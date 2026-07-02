@@ -1,7 +1,7 @@
 ---
-title: "Sessions API: Query Completed Table Sessions"
+title: "Sessions API: View All Completed Billiard Table Sessions"
 sidebarTitle: "Sessions"
-description: "GET /api/sesiones returns all completed billiard table sessions with billing details. Sessions are created automatically when a table is closed."
+description: "GET /api/sesiones returns every completed billiard table session with full billing details. Records are created automatically when a table is closed."
 ---
 
 Sessions (sesiones) are the permanent billing records that Billar Pro generates whenever a table is closed. You never create a session directly — the system creates one automatically when `PUT /api/mesas/{id}/cerrar` is called. At that moment the service calculates elapsed time, applies the table's hourly rate, sums all open consumptions, and writes a single immutable Sesion row. The sessions API therefore provides **read-only** access to the complete historical ledger of every table session that has ever been closed.
@@ -12,7 +12,7 @@ Sessions (sesiones) are the permanent billing records that Billar Pro generates 
 
 Returns the full list of completed sessions ordered by database insertion sequence.
 
-**Authentication:** Required.
+**Authentication:** Required — include a valid JWT Bearer token.
 
 **Query parameters:** None.
 

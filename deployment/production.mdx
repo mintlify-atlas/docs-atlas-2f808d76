@@ -1,7 +1,7 @@
 ---
-title: "Deploy Billar Pro Backend to Production"
+title: "Production Deployment Guide for Billar Pro Backend"
 sidebarTitle: "Production"
-description: "Checklist and guidance for deploying Billar Pro Backend to a production environment: security hardening, JPA settings, CORS configuration, and building a JAR."
+description: "Checklist and guidance for taking Billar Pro Backend to production: security hardening, JPA settings, CORS configuration, and JAR deployment."
 ---
 
 Before you promote Billar Pro Backend beyond a local development machine there are several defaults that must change. The project ships with hardcoded passwords, an auto-schema-update JPA mode, SQL logging enabled, CORS locked to `localhost:5173`, a seed admin account with a known password, and — most critically — a JWT signing key that is randomly generated fresh on every startup. Each of these is intentional and convenient for development, but unsafe in production. This page walks through every required change before going live.
@@ -10,7 +10,7 @@ Before you promote Billar Pro Backend beyond a local development machine there a
 
 <Steps>
   <Step title="Build the JAR">
-    Billar Pro Backend requires **Java 21** (`java.version=21` in `pom.xml`). Verify your runtime before building:
+    Billar Pro Backend is built on **Spring Boot 3.5.11** and requires **Java 21** (`java.version=21` in `pom.xml`). Verify your runtime before building:
 
     ```bash
     java -version   # must be 21.x
@@ -51,12 +51,12 @@ Before you promote Billar Pro Backend beyond a local development machine there a
   </Step>
 
   <Step title="Set environment variables">
-    Never hardcode passwords or connection strings in committed files. Use environment variables (or a secrets manager such as AWS Secrets Manager, HashiCorp Vault, or Doppler) for all sensitive values. The `.env.example` file documents the three variables the application needs at runtime:
+    Never hardcode passwords or connection strings in committed files. Use environment variables (or a secrets manager such as AWS Secrets Manager, HashiCorp Vault, or Doppler) for all sensitive values. The `.env.example` file documents the variables the application needs at runtime:
 
     ```dotenv
-    DB_URL=jdbc:postgresql://localhost:5433/billardb
-    DB_USER=postgres
-    DB_PASSWORD=tu_password_local
+    DB_URL=jdbc:postgresql://<your-production-host>/<your-db-name>
+    DB_USER=<your-db-user>
+    DB_PASSWORD=<your-db-password>
     ```
 
     Supply these in your deployment environment and reference them in `application.yml`:
@@ -106,7 +106,7 @@ Before you promote Billar Pro Backend beyond a local development machine there a
       --spring.datasource.password=$DB_PASSWORD
     ```
 
-    For a long-running production process, run it under a process supervisor (systemd, Docker, Kubernetes) so it restarts automatically on failure.
+    For a long-running production process, run it under a process supervisor (systemd or Docker) so it restarts automatically on failure.
   </Step>
 </Steps>
 

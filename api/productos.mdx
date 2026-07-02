@@ -1,7 +1,7 @@
 ---
-title: "Products API: Manage the Product Catalog"
+title: "Products API: Full CRUD for the Billar Pro Product Catalog"
 sidebarTitle: "Products"
-description: "CRUD endpoints for the Billar Pro product catalog. Products can be linked to table sessions as consumptions. Mark products as unavailable instead of deleting them."
+description: "Five CRUD endpoints for the Billar Pro product catalog. Products carry a price and an availability flag so items can be hidden without erasing history."
 ---
 
 The products (productos) API manages the catalog of items — drinks, snacks, and anything else sold at the tables — that staff can record as consumptions during an active session. Each product carries a price and an availability flag so that seasonal or out-of-stock items can be hidden from the point-of-sale without permanently removing their history from past consumption records.
@@ -12,7 +12,7 @@ The products (productos) API manages the catalog of items — drinks, snacks, an
 
 Returns the complete product catalog, both available and unavailable items.
 
-**Authentication:** Required.
+**Authentication:** Required — include a valid JWT Bearer token.
 
 **Response:** `200 OK` — array of Producto objects.
 
@@ -49,7 +49,7 @@ curl -X GET http://localhost:8080/api/productos \
 
 Returns a single product by its primary key.
 
-**Authentication:** Required.
+**Authentication:** Required — include a valid JWT Bearer token.
 
 **Path parameters:**
 
@@ -78,7 +78,7 @@ curl -X GET http://localhost:8080/api/productos/5 \
 
 Creates a new product in the catalog.
 
-**Authentication:** Required.
+**Authentication:** Required — include a valid JWT Bearer token.
 
 **Request body (JSON):**
 
@@ -132,7 +132,7 @@ curl -X POST http://localhost:8080/api/productos \
 
 Replaces all fields of an existing product. All four body fields must be supplied — this is a full replacement, not a partial update.
 
-**Authentication:** Required.
+**Authentication:** Required — include a valid JWT Bearer token.
 
 **Path parameters:**
 
@@ -186,7 +186,7 @@ curl -X PUT http://localhost:8080/api/productos/8 \
 
 Permanently removes a product from the catalog.
 
-**Authentication:** Required.
+**Authentication:** Required — include a valid JWT Bearer token.
 
 **Path parameters:**
 

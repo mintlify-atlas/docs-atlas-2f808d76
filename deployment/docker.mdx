@@ -1,5 +1,5 @@
 ---
-title: "Run Billar Pro Backend with Docker Compose"
+title: "Set Up Billar Pro Backend for Local Dev with Docker Compose"
 sidebarTitle: "Docker Setup"
 description: "Set up Billar Pro Backend for local development using Docker Compose to run PostgreSQL 16, then launch the Spring Boot app with Maven."
 ---
@@ -83,7 +83,7 @@ DB_PASSWORD=tu_password_local
     cp src/main/resources/application-example.yml src/main/resources/application.yml
     ```
 
-    Edit `src/main/resources/application.yml` and replace `TU_CONTRASEÑA_AQUI` with your chosen password. Also confirm the JDBC URL uses port `5433`:
+    Edit `src/main/resources/application.yml` and replace `TU_CONTRASEÑA_AQUI` with your chosen password. The JDBC URL must use port `5433` (the Docker host port), not the default `5432`:
 
     ```yaml src/main/resources/application.yml
     spring:

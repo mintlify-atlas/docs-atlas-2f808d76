@@ -37,9 +37,10 @@ The data seeder seeds six tables on first boot — tables 1 and 2 at **8,000** p
     }
     ```
 
-    The service validates two rules before saving:
-    - `numero` must **not** already exist among active tables (`activa = true`). A duplicate throws a `RuntimeException`.
-    - `precioPorHora` must be present and greater than `0`. A zero or negative value throws a `RuntimeException`.
+    The service validates three rules before saving:
+    - `numero` must **not** already exist among active tables (`activa = true`). A duplicate throws `RuntimeException("Ya existe una mesa activa con ese número")`.
+    - `precioPorHora` must be present (non-null). An absent value throws `RuntimeException("El precio de la hora por mesa es obligatorio")`.
+    - `precioPorHora` must be greater than `0`. A zero or negative value throws `RuntimeException("El precio del tiempo por mesa debe ser mayor a 0")`.
 
     On success the table is stored with `estado = "LIBRE"` and `activa = true`.
   </Step>
@@ -159,7 +160,7 @@ Editing is blocked while the table is `OCUPADA` — the service throws a `Runtim
 
 ## Soft-Delete Behavior
 
-Deleting a table via `DELETE /api/mesas/{id}` follows a guarded path:
+Deleting a table via `DELETE /api/mesas/{id}/delete` follows a guarded path:
 
 - If the table has **no** associated sessions, it is physically removed from the database (`deleteById`).
 - If the table **has** at least one historical session, it is soft-deleted: `activa` is set to `false` and the record is preserved. This ensures that session history and reports referencing the table remain consistent.
@@ -172,4 +173,8 @@ Soft-deleted tables are excluded from `GET /api/mesas` (which queries `findAllBy
 
 <Warning>
   Calling `PUT /api/mesas/{id}/ocupar` on a table whose `estado` is already `"OCUPADA"` throws a `NegocioException`, which the global exception handler maps to an **HTTP 400 Bad Request**. Always verify the current state of a table before attempting to open it.
+</Warning>
+
+<Warning>
+  Calling `PUT /api/mesas/{id}/cerrar` on a table whose `estado` is already `"LIBRE"` also throws a `NegocioException` (HTTP 400 Bad Request). A table must be occupied before it can be closed.
 </Warning>

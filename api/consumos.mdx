@@ -1,7 +1,7 @@
 ---
-title: "Consumption API: Register Product Sales at Tables"
+title: "Consumptions API: Register and Query Product Sales at Tables"
 sidebarTitle: "Consumption"
-description: "POST /api/consumos records product sales against an active table. GET /api/consumos/mesa/{mesaId} returns open consumptions not yet linked to a session."
+description: "Three endpoints to register product sales at tables and query open consumptions. Records stay unlinked until the table closes and a session is created."
 ---
 
 Consumptions (consumos) are the line items that link a product to a table during an active session. Each time a customer orders a drink or snack, staff register a consumption record pointing to the table and the product. Those records accumulate with `sesion = null` while the table is in use, and when the table is eventually closed via `PUT /api/mesas/{id}/cerrar`, the system automatically sums all open consumptions, computes the `totalConsumos`, and permanently attaches every pending record to the newly created Sesion — so the full bill is captured in one atomic operation.
@@ -12,7 +12,7 @@ Consumptions (consumos) are the line items that link a product to a table during
 
 Returns every consumption record in the database, including those already linked to closed sessions.
 
-**Authentication:** Required.
+**Authentication:** Required — include a valid JWT Bearer token.
 
 **Response:** `200 OK` — array of Consumo objects.
 
@@ -71,8 +71,8 @@ Returns every consumption record in the database, including those already linked
   Timestamp when the consumption was registered, e.g. `"2025-06-01T15:22:45"`.
 </ResponseField>
 
-<ResponseField name="sesion" type="Long | null">
-  `null` while the consumption is open (table not yet closed). Set to the Sesion `id` once the table is closed.
+<ResponseField name="sesion" type="object | null">
+  `null` while the consumption is open (table not yet closed). Once the table is closed, this field contains the full Sesion object to which this consumption was attached.
 </ResponseField>
 
 #### Request example
@@ -88,7 +88,7 @@ curl -X GET http://localhost:8080/api/consumos \
 
 Registers a new product sale against a table. The server looks up the product price and computes `subtotal` automatically.
 
-**Authentication:** Required.
+**Authentication:** Required — include a valid JWT Bearer token.
 
 **Request body (JSON):**
 
@@ -118,7 +118,8 @@ The `subtotal` is persisted with the record and is not updated if the product pr
 
 | Status | Meaning |
 | ------ | ------- |
-| `404`  | `mesaId` or `productoId` does not exist. |
+| `404`  | `mesaId` does not exist (`"Mesa no encontrada"`). |
+| `404`  | `productoId` does not exist (`"Producto no encontrado"`). |
 | `404`  | Product exists but `disponible = false` (`"Producto no disponible"`). |
 
 #### Request example
@@ -165,7 +166,7 @@ curl -X POST http://localhost:8080/api/consumos \
 
 Returns only the **open** consumptions for a given table — that is, records where `sesion IS NULL`. These are the pending items that will be included in the bill when the table is eventually closed.
 
-**Authentication:** Required.
+**Authentication:** Required — include a valid JWT Bearer token.
 
 **Path parameters:**
 
@@ -179,7 +180,7 @@ Returns only the **open** consumptions for a given table — that is, records wh
 
 | Status | Meaning |
 | ------ | ------- |
-| `404`  | No table with that `mesaId` exists. |
+| `404`  | No table with that `mesaId` exists (`"Mesa no encontrada"`). |
 
 #### Request example
 

@@ -1,7 +1,7 @@
 ---
-title: "Tables API: Manage Billiard Table Lifecycle"
+title: "Billar Pro Tables API: Manage Billiard Table Lifecycle"
 sidebarTitle: "Tables"
-description: "REST endpoints for managing billiard tables: list, create, edit, open, close, and delete. Includes billing calculation details for PUT /api/mesas/{id}/cerrar."
+description: "REST endpoints for managing billiard tables: list, create, edit, open, close, and delete. Billing calculation details included for the close endpoint."
 ---
 
 The tables (mesas) API manages the complete lifecycle of every billiard table in the hall: creating and configuring tables, opening and closing player sessions with automatic billing calculation, editing table properties, and removing tables from service. All seven endpoints require a valid JWT bearer token in the `Authorization` header — see the [Authentication](/api/authentication) page to obtain one.
