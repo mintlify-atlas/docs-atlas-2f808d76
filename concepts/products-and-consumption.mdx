@@ -1,0 +1,194 @@
+---
+title: "Products and Consumption: Managing In-Session Sales"
+sidebarTitle: "Products & Consumption"
+description: "Understand how the Billar Pro product catalog works, how to register product consumption during a table session, and how consumption rolls up into session totals."
+---
+
+Billar Pro supports an in-house product catalog — beverages, snacks, or any other item sold at the hall — and lets staff register sales directly against an occupied table during an active session. When the table is eventually closed, all open consumptions are automatically summed and folded into the session total, giving a single, unified bill that covers both play time and product sales.
+
+## The Producto Entity
+
+Each item in the catalog is stored as a `Producto` record.
+
+| Field | Type | Description |
+|---|---|---|
+| `id` | `Long` | Auto-generated primary key. |
+| `nombre` | `String` | Display name of the product (e.g., `"Agua Postobón 600ml"`). |
+| `categoria` | `String` | Free-text category label (e.g., `"Bebidas"`, `"Snacks"`). |
+| `precio` | `Double` | Unit price charged per item. |
+| `disponible` | `boolean` | Availability flag. Only products where `disponible = true` can be added to a consumption. |
+
+### Product Availability
+
+Before saving a `Consumo`, the service checks `producto.isDisponible()`. If the flag is `false`, registration is blocked immediately:
+
+```java
+if (!producto.isDisponible()) {
+    throw new RuntimeException("Producto no disponible");
+}
+```
+
+This makes it possible to temporarily hide seasonal items or products that are out of stock without disrupting historical consumption records that reference those products.
+
+## The Consumo Entity
+
+A `Consumo` row represents a single line-item sale of a product to a table.
+
+| Field | Type | Description |
+|---|---|---|
+| `id` | `Long` | Auto-generated primary key. |
+| `mesa` | `Mesa` | FK to the table where the product was ordered. |
+| `producto` | `Producto` | FK to the catalog item that was sold. |
+| `cantidad` | `Integer` | Number of units ordered. |
+| `subtotal` | `Double` | Computed as `producto.getPrecio() × cantidad`. Stored on the record at the time of registration. |
+| `fecha` | `LocalDateTime` | Exact timestamp when the consumption was registered (`LocalDateTime.now()`). |
+| `sesion` | `Sesion` | FK to the owning session. **`null` while the table is still open.** Set when the session closes. |
+
+The `sesion` field is the linking key that distinguishes open (in-flight) consumptions from closed (billed) ones. The query `findByMesaAndSesionIsNull(mesa)` is used both to list pending consumptions and to collect them during session closure.
+
+## The ConsumoRequest Body
+
+Registering a consumption requires a JSON body with three fields:
+
+| Field | Type | Description |
+|---|---|---|
+| `mesaId` | `Long` | ID of the occupied table. |
+| `productoId` | `Long` | ID of the catalog product being ordered. |
+| `cantidad` | `Integer` | Number of units. |
+
+```json
+{
+  "mesaId": 3,
+  "productoId": 5,
+  "cantidad": 2
+}
+```
+
+## Registration Flow
+
+<Steps>
+  <Step title="Locate or create a product">
+    List the existing catalog to find the product ID you need:
+
+    ```http
+    GET /api/productos
+    ```
+
+    If the product does not exist yet, create it:
+
+    ```http
+    POST /api/productos
+    Content-Type: application/json
+
+    {
+      "nombre": "Gatorade 500ml",
+      "categoria": "Bebidas",
+      "precio": 3500.0,
+      "disponible": true
+    }
+    ```
+
+    The response includes the new product's `id`, which you will use in the next step.
+  </Step>
+
+  <Step title="Register the consumption against the table">
+    While the target table's `estado` is `"OCUPADA"`, post the sale:
+
+    ```http
+    POST /api/consumos
+    Content-Type: application/json
+
+    {
+      "mesaId": 3,
+      "productoId": 5,
+      "cantidad": 2
+    }
+    ```
+
+    The service:
+    1. Resolves the `Mesa` by `mesaId` — throws `RuntimeException("Mesa no encontrada")` if absent.
+    2. Resolves the `Producto` by `productoId` — throws `RuntimeException("Producto no encontrado")` if absent.
+    3. Checks `producto.isDisponible()` — throws `RuntimeException("Producto no disponible")` if `false`.
+    4. Computes `subtotal = producto.getPrecio() * cantidad`.
+    5. Saves the `Consumo` with `sesion = null` and `fecha = LocalDateTime.now()`.
+
+    The saved `Consumo` is returned in the response body.
+  </Step>
+
+  <Step title="Query open consumptions for a table">
+    To display a running tab for an occupied table, fetch all unlinked consumptions:
+
+    ```http
+    GET /api/consumos/mesa/{mesaId}
+    ```
+
+    This calls `consumoRepository.findByMesaAndSesionIsNull(mesa)`, returning only the line items that have not yet been assigned to a closed session — i.e., the active tab.
+
+    **Example response:**
+
+    ```json
+    [
+      {
+        "id": 12,
+        "mesa": { "id": 3, "numero": 3 },
+        "producto": { "id": 5, "nombre": "Gatorade 500ml", "precio": 3500.0 },
+        "cantidad": 2,
+        "subtotal": 7000.0,
+        "fecha": "2025-01-15T14:32:00",
+        "sesion": null
+      }
+    ]
+    ```
+  </Step>
+
+  <Step title="Close the table to link all consumptions to the session">
+    When play ends, call:
+
+    ```http
+    PUT /api/mesas/{id}/cerrar
+    ```
+
+    `SesionService.guardarSesion` fetches every `Consumo` where `sesion IS NULL` for this table, sums their `subtotal` values, persists the `Sesion`, and then updates each `Consumo` record to point at the new session. After this step the consumptions are permanently linked and no longer appear in the open tab query. See [Tables & Sessions](/concepts/tables-and-sessions) for the full closure flow.
+  </Step>
+</Steps>
+
+## Managing the Product Catalog
+
+<CardGroup cols={2}>
+  <Card title="List all products" icon="list">
+    ```http
+    GET /api/productos
+    ```
+    Returns every product in the catalog regardless of `disponible` status.
+  </Card>
+  <Card title="Get a single product" icon="magnifying-glass">
+    ```http
+    GET /api/productos/{id}
+    ```
+    Throws `RuntimeException("Producto no encontrado")` if the ID does not exist.
+  </Card>
+  <Card title="Update a product" icon="pen-to-square">
+    ```http
+    PUT /api/productos/{id}
+    Content-Type: application/json
+
+    {
+      "nombre": "Agua 600ml",
+      "categoria": "Bebidas",
+      "precio": 2500.0,
+      "disponible": true
+    }
+    ```
+    Updates `nombre`, `categoria`, `precio`, and `disponible` in a single call.
+  </Card>
+  <Card title="Delete a product" icon="trash">
+    ```http
+    DELETE /api/productos/{id}
+    ```
+    Physically removes the record. See the tip below before deleting.
+  </Card>
+</CardGroup>
+
+<Tip>
+  Prefer setting `disponible = false` over deleting a product. Hard-deleting a `Producto` that is referenced by historical `Consumo` rows will violate the foreign-key constraint and cause a database error. Marking it unavailable hides it from new sales while keeping all past consumption records intact — which is essential for accurate historical reports.
+</Tip>

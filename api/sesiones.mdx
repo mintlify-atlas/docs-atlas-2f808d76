@@ -1,0 +1,109 @@
+---
+title: "Sessions API: Query Completed Table Sessions"
+sidebarTitle: "Sessions"
+description: "GET /api/sesiones returns all completed billiard table sessions with billing details. Sessions are created automatically when a table is closed."
+---
+
+Sessions (sesiones) are the permanent billing records that Billar Pro generates whenever a table is closed. You never create a session directly — the system creates one automatically when `PUT /api/mesas/{id}/cerrar` is called. At that moment the service calculates elapsed time, applies the table's hourly rate, sums all open consumptions, and writes a single immutable Sesion row. The sessions API therefore provides **read-only** access to the complete historical ledger of every table session that has ever been closed.
+
+## Endpoints
+
+### GET /api/sesiones
+
+Returns the full list of completed sessions ordered by database insertion sequence.
+
+**Authentication:** Required.
+
+**Query parameters:** None.
+
+**Response:** `200 OK` — array of Sesion objects.
+
+<ResponseField name="id" type="Long">
+  Auto-generated primary key of the session.
+</ResponseField>
+
+<ResponseField name="mesa" type="object">
+  The billiard table that was closed to produce this session.
+  <Expandable title="mesa fields">
+    <ResponseField name="id" type="Long">
+      Primary key of the table.
+    </ResponseField>
+    <ResponseField name="numero" type="Integer">
+      Human-readable table number displayed on the hall floor.
+    </ResponseField>
+    <ResponseField name="estado" type="String">
+      Table status at the time of serialization — typically `"LIBRE"` immediately after closing.
+    </ResponseField>
+    <ResponseField name="precioPorHora" type="Double">
+      Hourly rate (local currency) that was charged for this table.
+    </ResponseField>
+  </Expandable>
+</ResponseField>
+
+<ResponseField name="horaInicio" type="String (ISO 8601 datetime)">
+  Timestamp when the table was opened and the session clock started, e.g. `"2025-06-01T14:00:00"`.
+</ResponseField>
+
+<ResponseField name="horaFin" type="String (ISO 8601 datetime)">
+  Timestamp when `PUT /api/mesas/{id}/cerrar` was called and the session was finalised.
+</ResponseField>
+
+<ResponseField name="horasJugadas" type="Double">
+  Elapsed time in fractional hours, computed as `Duration.toMinutes() / 60.0`.
+</ResponseField>
+
+<ResponseField name="totalMesa" type="Double">
+  Table charge: `horasJugadas × mesa.precioPorHora`.
+</ResponseField>
+
+<ResponseField name="totalConsumos" type="Double">
+  Sum of the `subtotal` of every Consumo linked to this session.
+</ResponseField>
+
+<ResponseField name="totalGeneral" type="Double">
+  Grand total: `totalMesa + totalConsumos`.
+</ResponseField>
+
+<ResponseField name="fecha" type="String (ISO 8601 date)">
+  Calendar date on which the session was recorded, e.g. `"2025-06-01"`.
+</ResponseField>
+
+#### Request example
+
+```bash
+curl -X GET http://localhost:8080/api/sesiones \
+  -H "Authorization: Bearer <token>"
+```
+
+#### Response example
+
+```json
+[
+  {
+    "id": 12,
+    "mesa": {
+      "id": 3,
+      "numero": 3,
+      "estado": "LIBRE",
+      "precioPorHora": 8000.0
+    },
+    "horaInicio": "2025-06-01T14:00:00",
+    "horaFin": "2025-06-01T16:30:00",
+    "horasJugadas": 2.5,
+    "totalMesa": 20000.0,
+    "totalConsumos": 7500.0,
+    "totalGeneral": 27500.0,
+    "fecha": "2025-06-01"
+  }
+]
+```
+
+---
+
+<Note>
+  Sessions are created exclusively by the table-close workflow (`PUT /api/mesas/{id}/cerrar`). There are no `POST`, `PUT`, or `DELETE` endpoints on `/api/sesiones` — the historical record is immutable once written.
+</Note>
+
+<Tip>
+  For aggregated analytics — daily revenue, busiest tables, average session length — see the `/api/reportes` endpoints, which build on top of the sessions table.
+</Tip>

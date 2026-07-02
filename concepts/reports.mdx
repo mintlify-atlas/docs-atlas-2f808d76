@@ -1,0 +1,258 @@
+---
+title: "Revenue Reports: Daily, Weekly, and Monthly Analytics"
+sidebarTitle: "Reports"
+description: "Explore Billar Pro's reporting system: aggregate revenue summaries, per-table breakdowns, daily income trends, top-selling products, and average ticket metrics."
+---
+
+The reports module aggregates data from closed session records and provides five distinct views of hall revenue across multiple time windows — a single day, an arbitrary date range, or a full calendar month. All computations are performed in-memory by iterating over the matching `Sesion` rows returned from the database, keeping the queries simple and the logic transparent.
+
+<Note>
+  Every report endpoint filters strictly on sessions where `horaFin IS NOT NULL`. Sessions that are currently open (table still occupied) are never included in any report figure. This guarantees that all numbers reflect fully settled, closed transactions only.
+</Note>
+
+---
+
+## 1. Revenue Summary — `ReporteDTO`
+
+The summary report aggregates the total money earned from table time and product sales for a given window. Three sub-endpoints share the same `ReporteDTO` response shape.
+
+### Response fields
+
+| Field | Type | Description |
+|---|---|---|
+| `totalMesas` | `Double` | Sum of `sesion.totalMesa` across all matching sessions. |
+| `totalConsumos` | `Double` | Sum of `sesion.totalConsumos` across all matching sessions. |
+| `totalGeneral` | `Double` | Sum of `sesion.totalGeneral` — equivalent to `totalMesas + totalConsumos`. |
+| `numeroSesiones` | `Integer` | Count of closed sessions in the requested window. |
+
+### Daily summary
+
+Requires a single date expressed as `YYYY-MM-DD`.
+
+```http
+GET /api/reportes/diario?fecha=2025-01-15
+```
+
+```bash
+curl -X GET "http://localhost:8080/api/reportes/diario?fecha=2025-01-15" \
+  -H "Authorization: Bearer <token>"
+```
+
+**Example response:**
+
+```json
+{
+  "totalMesas": 48000.0,
+  "totalConsumos": 15200.0,
+  "totalGeneral": 63200.0,
+  "numeroSesiones": 6
+}
+```
+
+### Weekly summary
+
+Requires explicit start and end dates. The range is inclusive on both ends.
+
+```http
+GET /api/reportes/semanal?inicio=2025-01-13&fin=2025-01-19
+```
+
+```bash
+curl -X GET "http://localhost:8080/api/reportes/semanal?inicio=2025-01-13&fin=2025-01-19" \
+  -H "Authorization: Bearer <token>"
+```
+
+### Monthly summary
+
+Requires `mes` (integer, 1–12) and `anio` (four-digit year). The service computes the first and last day of the month internally using `LocalDate.of(anio, mes, 1)` and `primerDia.withDayOfMonth(primerDia.lengthOfMonth())`.
+
+```http
+GET /api/reportes/mensual?mes=1&anio=2025
+```
+
+```bash
+curl -X GET "http://localhost:8080/api/reportes/mensual?mes=1&anio=2025" \
+  -H "Authorization: Bearer <token>"
+```
+
+---
+
+## 2. Income by Table — `IngresoPorMesaDTO`
+
+Breaks down revenue by individual table for a given window. Results are returned as a list — one entry per table that had at least one closed session in the period. The list is not guaranteed to be in any particular order.
+
+### Response fields
+
+| Field | Type | Description |
+|---|---|---|
+| `numero` | `Integer` | The table's human-readable number (e.g., `3`). |
+| `totalRecaudado` | `Double` | Sum of `sesion.totalGeneral` for all sessions on this table within the window. |
+| `numeroSesiones` | `Integer` | Count of closed sessions on this table within the window. |
+
+### Endpoints
+
+```http
+GET /api/reportes/ingresos-por-mesa/diario?fecha=2025-01-15
+GET /api/reportes/ingresos-por-mesa/semanal?inicio=2025-01-13&fin=2025-01-19
+GET /api/reportes/ingresos-por-mesa/mensual?mes=1&anio=2025
+```
+
+```bash
+# Daily breakdown by table
+curl -X GET "http://localhost:8080/api/reportes/ingresos-por-mesa/diario?fecha=2025-01-15" \
+  -H "Authorization: Bearer <token>"
+```
+
+**Example response:**
+
+```json
+[
+  { "numero": 1, "totalRecaudado": 24000.0, "numeroSesiones": 3 },
+  { "numero": 3, "totalRecaudado": 18000.0, "numeroSesiones": 2 },
+  { "numero": 5, "totalRecaudado": 12000.0, "numeroSesiones": 1 }
+]
+```
+
+---
+
+## 3. Income by Day — `IngresoPorDiaDTO`
+
+Produces a time-series of daily revenue totals within an arbitrary date range. The service groups sessions by their `fecha` field (the calendar date on which they were closed) and returns the list sorted ascending by date.
+
+### Response fields
+
+| Field | Type | Description |
+|---|---|---|
+| `fecha` | `LocalDate` | The calendar date (`YYYY-MM-DD`). |
+| `totalMesas` | `Double` | Sum of table-time charges for all sessions closed on this date. |
+| `totalConsumos` | `Double` | Sum of product consumption charges for all sessions closed on this date. |
+| `totalGeneral` | `Double` | `totalMesas + totalConsumos` for this date. |
+
+### Endpoint
+
+```http
+GET /api/reportes/ingresos-por-dia?inicio=2025-01-01&fin=2025-01-31
+```
+
+```bash
+curl -X GET "http://localhost:8080/api/reportes/ingresos-por-dia?inicio=2025-01-01&fin=2025-01-31" \
+  -H "Authorization: Bearer <token>"
+```
+
+**Example response:**
+
+```json
+[
+  {
+    "fecha": "2025-01-13",
+    "totalMesas": 16000.0,
+    "totalConsumos": 4800.0,
+    "totalGeneral": 20800.0
+  },
+  {
+    "fecha": "2025-01-14",
+    "totalMesas": 22000.0,
+    "totalConsumos": 6100.0,
+    "totalGeneral": 28100.0
+  }
+]
+```
+
+---
+
+## 4. Top Products — `ProductoTopDTO`
+
+Identifies the best-selling products within a window by aggregating consumption records that belong to closed sessions. Results are sorted by `cantidadVendida` descending and capped at the **top 10** products.
+
+### Response fields
+
+| Field | Type | Description |
+|---|---|---|
+| `nombre` | `String` | Product name as stored in the catalog. |
+| `cantidadVendida` | `Integer` | Total units sold across all matching closed-session consumptions. |
+| `totalRecaudado` | `Double` | Sum of `consumo.subtotal` for this product within the window. |
+
+### Endpoints
+
+```http
+GET /api/reportes/productos-top/diario?fecha=2025-01-15
+GET /api/reportes/productos-top/semanal?inicio=2025-01-13&fin=2025-01-19
+GET /api/reportes/productos-top/mensual?mes=1&anio=2025
+```
+
+```bash
+# Weekly top products
+curl -X GET "http://localhost:8080/api/reportes/productos-top/semanal?inicio=2025-01-13&fin=2025-01-19" \
+  -H "Authorization: Bearer <token>"
+```
+
+**Example response:**
+
+```json
+[
+  { "nombre": "Gatorade 500ml", "cantidadVendida": 42, "totalRecaudado": 147000.0 },
+  { "nombre": "Agua Postobón 600ml", "cantidadVendida": 38, "totalRecaudado": 76000.0 },
+  { "nombre": "Papas Margarita", "cantidadVendida": 25, "totalRecaudado": 62500.0 }
+]
+```
+
+---
+
+## 5. Average Ticket — `TicketPromedioDTO`
+
+Computes per-session averages over an arbitrary date range, giving a measure of how much each closed game generates on average in table time, product sales, and combined total.
+
+### Response fields
+
+| Field | Type | Description |
+|---|---|---|
+| `totalFacturado` | `Double` | Grand total (`totalGeneral`) across all sessions in the range. |
+| `totalMesas` | `Double` | Cumulative table-time revenue across all sessions in the range. |
+| `totalConsumos` | `Double` | Cumulative product-consumption revenue across all sessions in the range. |
+| `partidasCerradas` | `Integer` | Number of closed sessions in the range. |
+| `ticketPromedio` | `Double` | `totalFacturado / partidasCerradas`. Returns `0.0` if there are no sessions. |
+| `promedioMesa` | `Double` | `totalMesas / partidasCerradas`. Returns `0.0` if there are no sessions. |
+| `promedioConsumos` | `Double` | `totalConsumos / partidasCerradas`. Returns `0.0` if there are no sessions. |
+
+### Endpoint
+
+```http
+GET /api/reportes/ticket-promedio?inicio=2025-01-01&fin=2025-01-31
+```
+
+```bash
+curl -X GET "http://localhost:8080/api/reportes/ticket-promedio?inicio=2025-01-01&fin=2025-01-31" \
+  -H "Authorization: Bearer <token>"
+```
+
+**Example response:**
+
+```json
+{
+  "totalFacturado": 420000.0,
+  "totalMesas": 312000.0,
+  "totalConsumos": 108000.0,
+  "partidasCerradas": 48,
+  "ticketPromedio": 8750.0,
+  "promedioMesa": 6500.0,
+  "promedioConsumos": 2250.0
+}
+```
+
+---
+
+## Quick Reference
+
+| Report | Endpoint | Time params |
+|---|---|---|
+| Daily summary | `GET /api/reportes/diario` | `?fecha=YYYY-MM-DD` |
+| Weekly summary | `GET /api/reportes/semanal` | `?inicio=YYYY-MM-DD&fin=YYYY-MM-DD` |
+| Monthly summary | `GET /api/reportes/mensual` | `?mes=M&anio=YYYY` |
+| Income by table (daily) | `GET /api/reportes/ingresos-por-mesa/diario` | `?fecha=YYYY-MM-DD` |
+| Income by table (weekly) | `GET /api/reportes/ingresos-por-mesa/semanal` | `?inicio=YYYY-MM-DD&fin=YYYY-MM-DD` |
+| Income by table (monthly) | `GET /api/reportes/ingresos-por-mesa/mensual` | `?mes=M&anio=YYYY` |
+| Income by day | `GET /api/reportes/ingresos-por-dia` | `?inicio=YYYY-MM-DD&fin=YYYY-MM-DD` |
+| Top products (daily) | `GET /api/reportes/productos-top/diario` | `?fecha=YYYY-MM-DD` |
+| Top products (weekly) | `GET /api/reportes/productos-top/semanal` | `?inicio=YYYY-MM-DD&fin=YYYY-MM-DD` |
+| Top products (monthly) | `GET /api/reportes/productos-top/mensual` | `?mes=M&anio=YYYY` |
+| Average ticket | `GET /api/reportes/ticket-promedio` | `?inicio=YYYY-MM-DD&fin=YYYY-MM-DD` |

@@ -1,0 +1,84 @@
+---
+title: "Billar Pro Backend: Spring Boot API for Billiard Halls"
+sidebarTitle: "Introduction"
+description: "Overview of the Billar Pro Backend API: its domain model, technology stack, and how all resources fit together to manage a billiard hall."
+---
+
+Billar Pro Backend is a RESTful API built with Spring Boot 3.5 and Java 21 that provides everything a billiard hall operator needs to run their business digitally. It tracks the real-time state of every table, records timed play sessions, manages a product inventory, and ties consumption to individual sessions — all secured behind a stateless JWT authentication layer. Whether you are building a point-of-sale frontend, a management dashboard, or a mobile companion app, this API provides the consistent, well-structured data contract your client needs.
+
+## Technology Stack
+
+Billar Pro Backend is assembled from a focused set of production-grade libraries:
+
+| Layer | Technology | Version |
+|---|---|---|
+| Language | Java | 21 |
+| Framework | Spring Boot | 3.5.11 |
+| Persistence | Spring Data JPA + Hibernate | (Spring Boot managed) |
+| Database | PostgreSQL | 16 |
+| Security | Spring Security + JJWT | 0.11.5 |
+| Password hashing | BCrypt | (Spring Security managed) |
+| Build tool | Apache Maven | (via `mvnw` wrapper) |
+
+The application is packaged as a single executable JAR and ships a `docker-compose.yml` for spinning up a local PostgreSQL 16 instance with a single command.
+
+## Domain Model
+
+The API revolves around four core entities that model every aspect of a billiard hall's daily operation:
+
+### Mesa (Table)
+
+Represents a physical billiard table. Each mesa has a number, a current state (`LIBRE` or `OCUPADA`), a price per hour, and an optional `horaInicio` timestamp that is set when a session begins. The DataSeeder pre-loads six tables on first run — tables 1–2 at **8,000/hr** and tables 3–6 at **6,000/hr**.
+
+### Sesion (Session)
+
+A timed play session tied to a single mesa. A sesion captures the start time, the end time, the duration, and the computed cost based on the table's hourly rate. Closing a sesion automatically marks the mesa as `LIBRE` again.
+
+### Producto (Product)
+
+An item from the hall's inventory (drinks, snacks, accessories) that can be sold during a session. Each producto has a name, a price, and a stock count.
+
+### Consumo (Consumption)
+
+Links a producto to a sesion, recording the quantity consumed and the subtotal. Multiple consumos can be attached to a single sesion, giving operators a full per-session receipt.
+
+## Quick Navigation
+
+<CardGroup cols={2}>
+  <Card title="Quickstart" icon="rocket" href="/quickstart">
+    Clone the repo, start PostgreSQL with Docker, and make your first API call in five steps.
+  </Card>
+  <Card title="Configuration" icon="gear" href="/configuration">
+    Full reference for database, JPA, server, CORS, and security settings.
+  </Card>
+  <Card title="Tables & Sessions" icon="table" href="/concepts/tables-and-sessions">
+    Deep dive into the Mesa and Sesion lifecycle, state transitions, and cost calculation.
+  </Card>
+  <Card title="API Reference" icon="code" href="/api/authentication">
+    Interactive reference for every endpoint, request body, and response schema.
+  </Card>
+</CardGroup>
+
+## Security Model
+
+Every endpoint except `POST /api/auth/login` requires a valid **JWT bearer token** in the `Authorization` header. The security layer is configured as follows:
+
+- **Stateless sessions** — Spring Security is set to `SessionCreationPolicy.STATELESS`; no HTTP session is ever created or used on the server side.
+- **JWT signing** — Tokens are signed with HMAC-SHA256. The signing key is generated in-memory at startup using `Keys.secretKeyFor(SignatureAlgorithm.HS256)`.
+- **Token expiry** — Tokens expire after **10 hours** (`EXPIRACION = 1000 * 60 * 60 * 10` ms).
+- **Password hashing** — All passwords are stored as BCrypt hashes; plaintext passwords are never persisted.
+- **CORS** — Requests from `http://localhost:5173` are allowed with credentials. Allowed HTTP methods are `GET`, `POST`, `PUT`, `DELETE`, and `OPTIONS`.
+- **CSRF** — Disabled; CSRF protection is unnecessary for stateless token-based APIs.
+
+## Default Seed Data
+
+On the very first application startup, the `DataSeeder` component automatically populates the database so the system is immediately usable:
+
+- **6 billiard tables** — mesas 1 and 2 at 8,000/hr; mesas 3, 4, 5, and 6 at 6,000/hr. All tables start in the `LIBRE` state.
+- **1 admin user** — username `admin`, password `billar123` (BCrypt-hashed before storage).
+
+The seeder only runs when the `mesas` and `usuarios` tables are empty, so it will not duplicate data on subsequent restarts.
+
+<Note>
+  The default credentials (`admin` / `billar123`) exist for local development convenience only. **Change the admin password before deploying to any environment accessible from the internet.** Leaving the default password in place is a critical security risk.
+</Note>

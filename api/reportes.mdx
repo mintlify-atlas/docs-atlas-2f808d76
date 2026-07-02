@@ -1,0 +1,640 @@
+---
+title: "Reports API: Revenue Analytics and Business Intelligence"
+sidebarTitle: "Reports"
+description: "Revenue reporting endpoints for Billar Pro: daily/weekly/monthly summaries, per-table income, daily income trends, top-selling products, and average ticket metrics."
+---
+
+The Reports API aggregates data from closed billiard sessions across configurable time windows, giving operators a clear picture of revenue performance. Endpoints span five analytical areas — revenue summaries, per-table income, day-by-day income trends, top-selling product rankings, and average ticket calculations. All endpoints are read-only (`GET`) and require a valid JWT bearer token in every request.
+
+<Note>
+  Every report endpoint filters exclusively for sessions where `horaFin IS NOT NULL`. Sessions that are still in progress (open sessions) are never included in any aggregation.
+</Note>
+
+---
+
+## Revenue Summary
+
+Aggregate totals for table time, product consumptions, and overall revenue across a chosen time window. All three variants return the same `ReporteDTO` shape.
+
+<Tabs>
+  <Tab title="Daily">
+    ### GET /api/reportes/diario
+
+    Returns the revenue summary for a single calendar day.
+
+    #### Query Parameters
+
+    <ParamField query="fecha" type="string" required>
+      The target date in ISO 8601 format (`YYYY-MM-DD`), e.g. `2025-01-15`.
+    </ParamField>
+
+    #### Response — `ReporteDTO`
+
+    <ResponseField name="totalMesas" type="Double">
+      Total revenue generated from table-time charges on the requested day.
+    </ResponseField>
+
+    <ResponseField name="totalConsumos" type="Double">
+      Total revenue generated from product/food/drink sales on the requested day.
+    </ResponseField>
+
+    <ResponseField name="totalGeneral" type="Double">
+      Combined total revenue (`totalMesas + totalConsumos`) for the requested day.
+    </ResponseField>
+
+    <ResponseField name="numeroSesiones" type="Integer">
+      Number of fully closed sessions included in the aggregation.
+    </ResponseField>
+
+    #### Example
+
+    ```bash
+    curl "http://localhost:8080/api/reportes/diario?fecha=2025-01-15" \
+      -H "Authorization: Bearer $TOKEN"
+    ```
+
+    ```json
+    {
+      "totalMesas": 120000.0,
+      "totalConsumos": 45500.0,
+      "totalGeneral": 165500.0,
+      "numeroSesiones": 14
+    }
+    ```
+  </Tab>
+
+  <Tab title="Weekly">
+    ### GET /api/reportes/semanal
+
+    Returns the revenue summary for an arbitrary date range, typically a calendar week.
+
+    #### Query Parameters
+
+    <ParamField query="inicio" type="string" required>
+      Start date of the range in ISO 8601 format (`YYYY-MM-DD`), inclusive.
+    </ParamField>
+
+    <ParamField query="fin" type="string" required>
+      End date of the range in ISO 8601 format (`YYYY-MM-DD`), inclusive.
+    </ParamField>
+
+    #### Response — `ReporteDTO`
+
+    <ResponseField name="totalMesas" type="Double">
+      Total revenue from table-time charges across the date range.
+    </ResponseField>
+
+    <ResponseField name="totalConsumos" type="Double">
+      Total revenue from product sales across the date range.
+    </ResponseField>
+
+    <ResponseField name="totalGeneral" type="Double">
+      Combined total revenue (`totalMesas + totalConsumos`) across the date range.
+    </ResponseField>
+
+    <ResponseField name="numeroSesiones" type="Integer">
+      Number of fully closed sessions included in the aggregation.
+    </ResponseField>
+
+    #### Example
+
+    ```bash
+    curl "http://localhost:8080/api/reportes/semanal?inicio=2025-01-13&fin=2025-01-19" \
+      -H "Authorization: Bearer $TOKEN"
+    ```
+
+    ```json
+    {
+      "totalMesas": 840000.0,
+      "totalConsumos": 312000.0,
+      "totalGeneral": 1152000.0,
+      "numeroSesiones": 97
+    }
+    ```
+  </Tab>
+
+  <Tab title="Monthly">
+    ### GET /api/reportes/mensual
+
+    Returns the revenue summary for a full calendar month. The service automatically resolves the first and last day of the given month.
+
+    #### Query Parameters
+
+    <ParamField query="mes" type="integer" required>
+      Month number (1–12).
+    </ParamField>
+
+    <ParamField query="anio" type="integer" required>
+      Four-digit year, e.g. `2025`.
+    </ParamField>
+
+    #### Response — `ReporteDTO`
+
+    <ResponseField name="totalMesas" type="Double">
+      Total revenue from table-time charges for the full calendar month.
+    </ResponseField>
+
+    <ResponseField name="totalConsumos" type="Double">
+      Total revenue from product sales for the full calendar month.
+    </ResponseField>
+
+    <ResponseField name="totalGeneral" type="Double">
+      Combined total revenue (`totalMesas + totalConsumos`) for the full calendar month.
+    </ResponseField>
+
+    <ResponseField name="numeroSesiones" type="Integer">
+      Number of fully closed sessions included in the aggregation.
+    </ResponseField>
+
+    #### Example
+
+    ```bash
+    curl "http://localhost:8080/api/reportes/mensual?mes=1&anio=2025" \
+      -H "Authorization: Bearer $TOKEN"
+    ```
+
+    ```json
+    {
+      "totalMesas": 3600000.0,
+      "totalConsumos": 1340000.0,
+      "totalGeneral": 4940000.0,
+      "numeroSesiones": 418
+    }
+    ```
+  </Tab>
+</Tabs>
+
+---
+
+## Income by Table
+
+Break down revenue and session counts per physical table for a given time window. Useful for identifying which tables drive the most business. All three variants return an array of `IngresoPorMesaDTO`.
+
+<Tabs>
+  <Tab title="Daily">
+    ### GET /api/reportes/ingresos-por-mesa/diario
+
+    Returns per-table income for a single day.
+
+    #### Query Parameters
+
+    <ParamField query="fecha" type="string" required>
+      Target date in ISO 8601 format (`YYYY-MM-DD`).
+    </ParamField>
+
+    #### Response — `IngresoPorMesaDTO[]`
+
+    <ResponseField name="numero" type="Integer">
+      The table number identifying which physical table this entry refers to.
+    </ResponseField>
+
+    <ResponseField name="totalRecaudado" type="Double">
+      Total revenue collected on this table (table time + consumptions) during the period.
+    </ResponseField>
+
+    <ResponseField name="numeroSesiones" type="Integer">
+      Number of fully closed sessions played on this table during the period.
+    </ResponseField>
+
+    #### Example
+
+    ```bash
+    curl "http://localhost:8080/api/reportes/ingresos-por-mesa/diario?fecha=2025-01-15" \
+      -H "Authorization: Bearer $TOKEN"
+    ```
+
+    ```json
+    [
+      {
+        "numero": 1,
+        "totalRecaudado": 54000.0,
+        "numeroSesiones": 5
+      },
+      {
+        "numero": 2,
+        "totalRecaudado": 48500.0,
+        "numeroSesiones": 4
+      },
+      {
+        "numero": 3,
+        "totalRecaudado": 63000.0,
+        "numeroSesiones": 5
+      }
+    ]
+    ```
+  </Tab>
+
+  <Tab title="Weekly">
+    ### GET /api/reportes/ingresos-por-mesa/semanal
+
+    Returns per-table income for an arbitrary date range.
+
+    #### Query Parameters
+
+    <ParamField query="inicio" type="string" required>
+      Start date in ISO 8601 format (`YYYY-MM-DD`), inclusive.
+    </ParamField>
+
+    <ParamField query="fin" type="string" required>
+      End date in ISO 8601 format (`YYYY-MM-DD`), inclusive.
+    </ParamField>
+
+    #### Response — `IngresoPorMesaDTO[]`
+
+    <ResponseField name="numero" type="Integer">
+      The table number identifying which physical table this entry refers to.
+    </ResponseField>
+
+    <ResponseField name="totalRecaudado" type="Double">
+      Total revenue collected on this table across the date range.
+    </ResponseField>
+
+    <ResponseField name="numeroSesiones" type="Integer">
+      Number of fully closed sessions played on this table across the date range.
+    </ResponseField>
+
+    #### Example
+
+    ```bash
+    curl "http://localhost:8080/api/reportes/ingresos-por-mesa/semanal?inicio=2025-01-13&fin=2025-01-19" \
+      -H "Authorization: Bearer $TOKEN"
+    ```
+
+    ```json
+    [
+      {
+        "numero": 1,
+        "totalRecaudado": 378000.0,
+        "numeroSesiones": 33
+      },
+      {
+        "numero": 2,
+        "totalRecaudado": 391500.0,
+        "numeroSesiones": 35
+      },
+      {
+        "numero": 3,
+        "totalRecaudado": 382500.0,
+        "numeroSesiones": 29
+      }
+    ]
+    ```
+  </Tab>
+
+  <Tab title="Monthly">
+    ### GET /api/reportes/ingresos-por-mesa/mensual
+
+    Returns per-table income for a full calendar month.
+
+    #### Query Parameters
+
+    <ParamField query="mes" type="integer" required>
+      Month number (1–12).
+    </ParamField>
+
+    <ParamField query="anio" type="integer" required>
+      Four-digit year, e.g. `2025`.
+    </ParamField>
+
+    #### Response — `IngresoPorMesaDTO[]`
+
+    <ResponseField name="numero" type="Integer">
+      The table number identifying which physical table this entry refers to.
+    </ResponseField>
+
+    <ResponseField name="totalRecaudado" type="Double">
+      Total revenue collected on this table during the full calendar month.
+    </ResponseField>
+
+    <ResponseField name="numeroSesiones" type="Integer">
+      Number of fully closed sessions played on this table during the full calendar month.
+    </ResponseField>
+
+    #### Example
+
+    ```bash
+    curl "http://localhost:8080/api/reportes/ingresos-por-mesa/mensual?mes=1&anio=2025" \
+      -H "Authorization: Bearer $TOKEN"
+    ```
+
+    ```json
+    [
+      {
+        "numero": 1,
+        "totalRecaudado": 1620000.0,
+        "numeroSesiones": 141
+      },
+      {
+        "numero": 2,
+        "totalRecaudado": 1680000.0,
+        "numeroSesiones": 150
+      },
+      {
+        "numero": 3,
+        "totalRecaudado": 1640000.0,
+        "numeroSesiones": 127
+      }
+    ]
+    ```
+  </Tab>
+</Tabs>
+
+---
+
+## Income by Day
+
+### GET /api/reportes/ingresos-por-dia
+
+Returns a day-by-day breakdown of revenue within a date range. Each entry in the response represents one calendar day that had at least one closed session. Results are sorted in **ascending date order**, making this endpoint well-suited for building trend charts.
+
+#### Query Parameters
+
+<ParamField query="inicio" type="string" required>
+  Start date of the range in ISO 8601 format (`YYYY-MM-DD`), inclusive.
+</ParamField>
+
+<ParamField query="fin" type="string" required>
+  End date of the range in ISO 8601 format (`YYYY-MM-DD`), inclusive.
+</ParamField>
+
+#### Response — `IngresoPorDiaDTO[]`
+
+The array is sorted ascending by `fecha`. Days within the range that have no closed sessions are **not** included.
+
+<ResponseField name="fecha" type="string">
+  Calendar date for this entry, formatted as `YYYY-MM-DD`.
+</ResponseField>
+
+<ResponseField name="totalMesas" type="Double">
+  Total revenue from table-time charges on this day.
+</ResponseField>
+
+<ResponseField name="totalConsumos" type="Double">
+  Total revenue from product sales on this day.
+</ResponseField>
+
+<ResponseField name="totalGeneral" type="Double">
+  Combined total revenue (`totalMesas + totalConsumos`) for this day.
+</ResponseField>
+
+#### Example
+
+```bash
+curl "http://localhost:8080/api/reportes/ingresos-por-dia?inicio=2025-01-13&fin=2025-01-15" \
+  -H "Authorization: Bearer $TOKEN"
+```
+
+```json
+[
+  {
+    "fecha": "2025-01-13",
+    "totalMesas": 115000.0,
+    "totalConsumos": 42000.0,
+    "totalGeneral": 157000.0
+  },
+  {
+    "fecha": "2025-01-14",
+    "totalMesas": 98000.0,
+    "totalConsumos": 37500.0,
+    "totalGeneral": 135500.0
+  },
+  {
+    "fecha": "2025-01-15",
+    "totalMesas": 120000.0,
+    "totalConsumos": 45500.0,
+    "totalGeneral": 165500.0
+  }
+]
+```
+
+<Tip>
+  Use this endpoint together with a charting library to render weekly or monthly revenue trend lines. The ascending sort order means you can pass the array directly to most chart data series without any client-side sorting.
+</Tip>
+
+---
+
+## Top Products
+
+Rank products by units sold within a chosen time window. The response is capped at **10 entries**, sorted by `cantidadVendida` descending. Only consumptions linked to fully closed sessions are counted.
+
+<Tabs>
+  <Tab title="Daily">
+    ### GET /api/reportes/productos-top/diario
+
+    Returns the top-selling products for a single day.
+
+    #### Query Parameters
+
+    <ParamField query="fecha" type="string" required>
+      Target date in ISO 8601 format (`YYYY-MM-DD`).
+    </ParamField>
+
+    #### Response — `ProductoTopDTO[]` (max 10, sorted by `cantidadVendida` descending)
+
+    <ResponseField name="nombre" type="String">
+      Product name as stored in the database.
+    </ResponseField>
+
+    <ResponseField name="cantidadVendida" type="Integer">
+      Total units of this product sold across all closed sessions on the target day.
+    </ResponseField>
+
+    <ResponseField name="totalRecaudado" type="Double">
+      Total revenue collected from this product (sum of line-item subtotals) on the target day.
+    </ResponseField>
+
+    #### Example
+
+    ```bash
+    curl "http://localhost:8080/api/reportes/productos-top/diario?fecha=2025-01-15" \
+      -H "Authorization: Bearer $TOKEN"
+    ```
+
+    ```json
+    [
+      { "nombre": "Cerveza", "cantidadVendida": 34, "totalRecaudado": 102000.0 },
+      { "nombre": "Gaseosa", "cantidadVendida": 22, "totalRecaudado": 44000.0 },
+      { "nombre": "Agua", "cantidadVendida": 18, "totalRecaudado": 27000.0 }
+    ]
+    ```
+  </Tab>
+
+  <Tab title="Weekly">
+    ### GET /api/reportes/productos-top/semanal
+
+    Returns the top-selling products for an arbitrary date range.
+
+    #### Query Parameters
+
+    <ParamField query="inicio" type="string" required>
+      Start date in ISO 8601 format (`YYYY-MM-DD`), inclusive.
+    </ParamField>
+
+    <ParamField query="fin" type="string" required>
+      End date in ISO 8601 format (`YYYY-MM-DD`), inclusive.
+    </ParamField>
+
+    #### Response — `ProductoTopDTO[]` (max 10, sorted by `cantidadVendida` descending)
+
+    <ResponseField name="nombre" type="String">
+      Product name as stored in the database.
+    </ResponseField>
+
+    <ResponseField name="cantidadVendida" type="Integer">
+      Total units of this product sold across all closed sessions in the date range.
+    </ResponseField>
+
+    <ResponseField name="totalRecaudado" type="Double">
+      Total revenue collected from this product across the date range.
+    </ResponseField>
+
+    #### Example
+
+    ```bash
+    curl "http://localhost:8080/api/reportes/productos-top/semanal?inicio=2025-01-13&fin=2025-01-19" \
+      -H "Authorization: Bearer $TOKEN"
+    ```
+
+    ```json
+    [
+      { "nombre": "Cerveza", "cantidadVendida": 238, "totalRecaudado": 714000.0 },
+      { "nombre": "Gaseosa", "cantidadVendida": 154, "totalRecaudado": 308000.0 },
+      { "nombre": "Agua", "cantidadVendida": 126, "totalRecaudado": 189000.0 }
+    ]
+    ```
+  </Tab>
+
+  <Tab title="Monthly">
+    ### GET /api/reportes/productos-top/mensual
+
+    Returns the top-selling products for a full calendar month.
+
+    #### Query Parameters
+
+    <ParamField query="mes" type="integer" required>
+      Month number (1–12).
+    </ParamField>
+
+    <ParamField query="anio" type="integer" required>
+      Four-digit year, e.g. `2025`.
+    </ParamField>
+
+    #### Response — `ProductoTopDTO[]` (max 10, sorted by `cantidadVendida` descending)
+
+    <ResponseField name="nombre" type="String">
+      Product name as stored in the database.
+    </ResponseField>
+
+    <ResponseField name="cantidadVendida" type="Integer">
+      Total units of this product sold across all closed sessions in the calendar month.
+    </ResponseField>
+
+    <ResponseField name="totalRecaudado" type="Double">
+      Total revenue collected from this product during the calendar month.
+    </ResponseField>
+
+    #### Example
+
+    ```bash
+    curl "http://localhost:8080/api/reportes/productos-top/mensual?mes=1&anio=2025" \
+      -H "Authorization: Bearer $TOKEN"
+    ```
+
+    ```json
+    [
+      { "nombre": "Cerveza",    "cantidadVendida": 1024, "totalRecaudado": 3072000.0 },
+      { "nombre": "Gaseosa",    "cantidadVendida":  660, "totalRecaudado": 1320000.0 },
+      { "nombre": "Agua",       "cantidadVendida":  541, "totalRecaudado":  811500.0 },
+      { "nombre": "Papas fritas","cantidadVendida": 318, "totalRecaudado":  795000.0 },
+      { "nombre": "Jugo",       "cantidadVendida":  275, "totalRecaudado":  550000.0 }
+    ]
+    ```
+  </Tab>
+</Tabs>
+
+---
+
+## Average Ticket
+
+### GET /api/reportes/ticket-promedio
+
+Calculates per-session averages over a date range, breaking out table time and product consumptions separately. This is the primary KPI endpoint for understanding how much revenue each billiard session generates on average.
+
+#### Query Parameters
+
+<ParamField query="inicio" type="string" required>
+  Start date of the range in ISO 8601 format (`YYYY-MM-DD`), inclusive.
+</ParamField>
+
+<ParamField query="fin" type="string" required>
+  End date of the range in ISO 8601 format (`YYYY-MM-DD`), inclusive.
+</ParamField>
+
+#### Response — `TicketPromedioDTO`
+
+<ResponseField name="totalFacturado" type="Double">
+  Total revenue collected across all closed sessions in the date range (`totalMesas + totalConsumos`).
+</ResponseField>
+
+<ResponseField name="totalMesas" type="Double">
+  Total revenue from table-time charges only, across all closed sessions in the range.
+</ResponseField>
+
+<ResponseField name="totalConsumos" type="Double">
+  Total revenue from product sales only, across all closed sessions in the range.
+</ResponseField>
+
+<ResponseField name="partidasCerradas" type="Integer">
+  Number of fully closed sessions in the date range. Used as the denominator for all average calculations.
+</ResponseField>
+
+<ResponseField name="ticketPromedio" type="Double">
+  Average total revenue per closed session: `totalFacturado / partidasCerradas`.
+</ResponseField>
+
+<ResponseField name="promedioMesa" type="Double">
+  Average table-time revenue per closed session: `totalMesas / partidasCerradas`.
+</ResponseField>
+
+<ResponseField name="promedioConsumos" type="Double">
+  Average product-sales revenue per closed session: `totalConsumos / partidasCerradas`.
+</ResponseField>
+
+<Note>
+  When `partidasCerradas` equals `0` (no closed sessions found in the range), all three average fields — `ticketPromedio`, `promedioMesa`, and `promedioConsumos` — return `0.0` instead of dividing by zero.
+</Note>
+
+#### Example
+
+```bash
+curl "http://localhost:8080/api/reportes/ticket-promedio?inicio=2025-01-01&fin=2025-01-31" \
+  -H "Authorization: Bearer $TOKEN"
+```
+
+```json
+{
+  "totalFacturado": 4940000.0,
+  "totalMesas": 3600000.0,
+  "totalConsumos": 1340000.0,
+  "partidasCerradas": 418,
+  "ticketPromedio": 11818.18,
+  "promedioMesa": 8612.44,
+  "promedioConsumos": 3205.74
+}
+```
+
+<Expandable title="Zero-session response example">
+  When no closed sessions exist in the requested range, the API returns:
+
+  ```json
+  {
+    "totalFacturado": 0.0,
+    "totalMesas": 0.0,
+    "totalConsumos": 0.0,
+    "partidasCerradas": 0,
+    "ticketPromedio": 0.0,
+    "promedioMesa": 0.0,
+    "promedioConsumos": 0.0
+  }
+  ```
+</Expandable>

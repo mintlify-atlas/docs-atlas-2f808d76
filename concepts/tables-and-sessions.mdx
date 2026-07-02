@@ -1,0 +1,175 @@
+---
+title: "Tables and Sessions: How Billar Pro Tracks Play Time"
+sidebarTitle: "Tables & Sessions"
+description: "Learn how Billar Pro manages billiard tables through a LIBRE/OCUPADA lifecycle, automatically calculates session duration, and computes billing on close."
+---
+
+Billar Pro models each physical billiard table as a **Mesa** entity that transitions between two states — `LIBRE` (free) and `OCUPADA` (occupied). The moment a table is marked occupied, the API records the exact start time. When it is closed, the elapsed time is used to compute the play charge, a **Sesion** record is persisted, and all product consumptions registered during that session are linked to it. This lifecycle is the core accounting unit of the system.
+
+## The Mesa Entity
+
+Every active table in the hall is represented by a `Mesa` row in the database.
+
+| Field | Type | Description |
+|---|---|---|
+| `id` | `Long` | Auto-generated primary key. |
+| `numero` | `Integer` | Human-readable table number displayed in the hall. Must be unique among active tables. |
+| `estado` | `String` | Current state: `"LIBRE"` or `"OCUPADA"`. Set to `"LIBRE"` on creation. |
+| `precioPorHora` | `Double` | Hourly rate charged for play time. Must be greater than `0`. |
+| `horaInicio` | `LocalDateTime` | The timestamp when the table was last opened. `null` while the table is free. |
+| `activa` | `Boolean` | Soft-delete flag. Defaults to `true`. Tables with existing sessions are never physically deleted; instead `activa` is set to `false`. |
+
+The data seeder seeds six tables on first boot — tables 1 and 2 at **8,000** per hour, and tables 3–6 at **6,000** per hour.
+
+## Table & Session Lifecycle
+
+<Steps>
+  <Step title="Create a table">
+    Register a new table by sending its number and hourly rate:
+
+    ```http
+    POST /api/mesas
+    Content-Type: application/json
+
+    {
+      "numero": 7,
+      "precioPorHora": 7000.0
+    }
+    ```
+
+    The service validates two rules before saving:
+    - `numero` must **not** already exist among active tables (`activa = true`). A duplicate throws a `RuntimeException`.
+    - `precioPorHora` must be present and greater than `0`. A zero or negative value throws a `RuntimeException`.
+
+    On success the table is stored with `estado = "LIBRE"` and `activa = true`.
+  </Step>
+
+  <Step title="Open a session — occupy the table">
+    When players sit down, mark the table as occupied:
+
+    ```http
+    PUT /api/mesas/{id}/ocupar
+    ```
+
+    The service sets `estado = "OCUPADA"` and captures `horaInicio = LocalDateTime.now()`, then persists the updated record. The response is the updated `Mesa` object.
+  </Step>
+
+  <Step title="Register consumptions">
+    While the table is occupied, staff can record any number of product sales against it:
+
+    ```http
+    POST /api/consumos
+    Content-Type: application/json
+
+    {
+      "mesaId": 3,
+      "productoId": 5,
+      "cantidad": 2
+    }
+    ```
+
+    Each `Consumo` record is saved with `sesion = null`, indicating it belongs to the current open session. See [Products & Consumption](/concepts/products-and-consumption) for full details.
+  </Step>
+
+  <Step title="Close the table">
+    When play ends, close the table to generate the final bill:
+
+    ```http
+    PUT /api/mesas/{id}/cerrar
+    ```
+
+    The service executes the following steps atomically:
+
+    1. Reads `horaInicio` from the `Mesa` record.
+    2. Captures `ahora = LocalDateTime.now()`.
+    3. Computes elapsed time:
+       ```java
+       double horas = Duration.between(mesa.getHoraInicio(), ahora).toMinutes() / 60.0;
+       ```
+    4. Computes the table charge:
+       ```java
+       double total = horas * mesa.getPrecioPorHora();
+       ```
+    5. Calls `SesionService.guardarSesion(mesa, horaInicio, ahora)`, which:
+       - Fetches all `Consumo` records for this table where `sesion IS NULL`.
+       - Sums their `subtotal` values into `totalConsumos`.
+       - Persists a new `Sesion` row.
+       - Updates every pending `Consumo` to point at the new session.
+    6. Resets `mesa.estado = "LIBRE"` and `mesa.horaInicio = null`.
+
+    The response is a `CierreMesaDTO` with the complete breakdown.
+  </Step>
+</Steps>
+
+## The CierreMesaDTO Response
+
+Closing a table returns the following payload:
+
+| Field | Type | Description |
+|---|---|---|
+| `horasJugadas` | `Double` | Elapsed play time expressed as a decimal fraction of hours (e.g., `1.5` = 1 h 30 min). |
+| `precioPorHora` | `Double` | The table's configured hourly rate at the time of closing. |
+| `totalAPagar` | `Double` | `horasJugadas × precioPorHora` — the charge for play time only. |
+| `totalConsumos` | `Double` | Sum of all product consumption subtotals linked to this session. |
+| `totalGeneral` | `Double` | `totalAPagar + totalConsumos` — the complete amount due. |
+
+**Example response:**
+
+```json
+{
+  "horasJugadas": 1.5,
+  "precioPorHora": 8000.0,
+  "totalAPagar": 12000.0,
+  "totalConsumos": 4500.0,
+  "totalGeneral": 16500.0
+}
+```
+
+## The Sesion Entity
+
+Once a table is closed, a `Sesion` record provides a permanent, immutable record of that game.
+
+| Field | Type | Description |
+|---|---|---|
+| `id` | `Long` | Auto-generated primary key. |
+| `mesa` | `Mesa` | FK reference to the table that was played on. |
+| `horaInicio` | `LocalDateTime` | Exact timestamp when the table was occupied. |
+| `horaFin` | `LocalDateTime` | Exact timestamp when the table was closed. |
+| `horasJugadas` | `Double` | Computed decimal hours between `horaInicio` and `horaFin`. |
+| `totalMesa` | `Double` | `horasJugadas × precioPorHora`. |
+| `totalConsumos` | `Double` | Sum of all product subtotals in this session. |
+| `totalGeneral` | `Double` | `totalMesa + totalConsumos`. |
+| `fecha` | `LocalDate` | Calendar date (`LocalDate.now()`) on which the session was closed. Used for all report queries. |
+
+## Editing a Table
+
+A table's `numero` and `precioPorHora` can be updated via:
+
+```http
+PUT /api/mesas/{id}
+Content-Type: application/json
+
+{
+  "numero": 2,
+  "precioPorHora": 9000.0
+}
+```
+
+Editing is blocked while the table is `OCUPADA` — the service throws a `RuntimeException` to prevent modifying an in-progress session's rate.
+
+## Soft-Delete Behavior
+
+Deleting a table via `DELETE /api/mesas/{id}` follows a guarded path:
+
+- If the table has **no** associated sessions, it is physically removed from the database (`deleteById`).
+- If the table **has** at least one historical session, it is soft-deleted: `activa` is set to `false` and the record is preserved. This ensures that session history and reports referencing the table remain consistent.
+
+Soft-deleted tables are excluded from `GET /api/mesas` (which queries `findAllByActivaTrue`) and from the uniqueness check on `numero`.
+
+<Note>
+  Billing is strictly time-proportional. The formula `Duration.between(horaInicio, now()).toMinutes() / 60.0` converts the elapsed minutes into a decimal hours value before multiplying by the hourly rate. A session of 45 minutes on a table priced at 8,000/hr therefore yields **6,000** — exactly 0.75 × 8,000.
+</Note>
+
+<Warning>
+  Calling `PUT /api/mesas/{id}/ocupar` on a table whose `estado` is already `"OCUPADA"` throws a `NegocioException`, which the global exception handler maps to an **HTTP 400 Bad Request**. Always verify the current state of a table before attempting to open it.
+</Warning>

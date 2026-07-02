@@ -1,0 +1,422 @@
+---
+title: "Tables API: Manage Billiard Table Lifecycle"
+sidebarTitle: "Tables"
+description: "REST endpoints for managing billiard tables: list, create, edit, open, close, and delete. Includes billing calculation details for PUT /api/mesas/{id}/cerrar."
+---
+
+The tables (mesas) API manages the complete lifecycle of every billiard table in the hall: creating and configuring tables, opening and closing player sessions with automatic billing calculation, editing table properties, and removing tables from service. All seven endpoints require a valid JWT bearer token in the `Authorization` header — see the [Authentication](/api/authentication) page to obtain one.
+
+---
+
+## Table object
+
+Every endpoint that returns a table uses the following schema:
+
+<ResponseField name="id" type="integer">
+  Auto-generated primary key for the table record.
+</ResponseField>
+
+<ResponseField name="numero" type="integer">
+  The table's display number within the hall. Must be unique among all active tables.
+</ResponseField>
+
+<ResponseField name="estado" type="string">
+  Current occupancy state of the table. One of `"LIBRE"` (available) or `"OCUPADA"` (in use).
+</ResponseField>
+
+<ResponseField name="precioPorHora" type="number">
+  Hourly rate for this table in the local currency. Must be greater than `0`.
+</ResponseField>
+
+<ResponseField name="horaInicio" type="string | null">
+  ISO-8601 datetime at which the current session started. `null` when `estado` is `"LIBRE"`.
+</ResponseField>
+
+<ResponseField name="activa" type="boolean">
+  Whether the table is active. Only tables with `activa = true` are returned by the list endpoint. A table with session history is soft-deleted by setting this to `false`.
+</ResponseField>
+
+---
+
+## GET /api/mesas
+
+Returns a list of all **active** tables (`activa = true`). Tables that have been soft-deleted are excluded.
+
+**Auth required:** Yes
+
+### Example request
+
+```bash
+curl http://localhost:8080/api/mesas \
+  -H "Authorization: Bearer <token>"
+```
+
+### Example response (HTTP 200)
+
+```json
+[
+  {
+    "id": 1,
+    "numero": 1,
+    "estado": "LIBRE",
+    "precioPorHora": 8000.0,
+    "horaInicio": null,
+    "activa": true
+  },
+  {
+    "id": 2,
+    "numero": 2,
+    "estado": "OCUPADA",
+    "precioPorHora": 8000.0,
+    "horaInicio": "2025-01-15T10:00:00",
+    "activa": true
+  }
+]
+```
+
+---
+
+## POST /api/mesas
+
+Creates a new billiard table. The table is initialized with `estado = "LIBRE"` and `activa = true`.
+
+**Auth required:** Yes
+
+### Request body
+
+<ParamField body="numero" type="integer" required>
+  The display number for the new table. Must be unique among all currently active tables — the service checks `existsByNumeroAndActivaTrue` before saving.
+</ParamField>
+
+<ParamField body="precioPorHora" type="number" required>
+  The hourly billing rate for the table. Must be provided and strictly greater than `0`.
+</ParamField>
+
+### Example request
+
+```bash
+curl -X POST http://localhost:8080/api/mesas \
+  -H "Authorization: Bearer <token>" \
+  -H "Content-Type: application/json" \
+  -d '{"numero": 3, "precioPorHora": 8000.0}'
+```
+
+### Example response (HTTP 200)
+
+```json
+{
+  "id": 3,
+  "numero": 3,
+  "estado": "LIBRE",
+  "precioPorHora": 8000.0,
+  "horaInicio": null,
+  "activa": true
+}
+```
+
+### Validation errors (HTTP 404)
+
+| Condition | `mensaje` |
+|-----------|-----------|
+| Another active table already has this `numero` | `"Ya existe una mesa activa con ese número"` |
+| `precioPorHora` is missing (`null`) | `"El precio de la hora por mesa es obligatorio"` |
+| `precioPorHora` is `<= 0` | `"El precio del tiempo por mesa debe ser mayor a 0"` |
+
+---
+
+## GET /api/mesas/{id}
+
+Returns a single table by its primary key ID.
+
+**Auth required:** Yes
+
+### Path parameter
+
+<ParamField path="id" type="integer" required>
+  The primary key (`id`) of the table to retrieve.
+</ParamField>
+
+### Example request
+
+```bash
+curl http://localhost:8080/api/mesas/1 \
+  -H "Authorization: Bearer <token>"
+```
+
+### Example response (HTTP 200)
+
+```json
+{
+  "id": 1,
+  "numero": 1,
+  "estado": "LIBRE",
+  "precioPorHora": 8000.0,
+  "horaInicio": null,
+  "activa": true
+}
+```
+
+### Error (HTTP 404)
+
+If no table with the given ID exists, the server returns:
+
+```json
+{
+  "timestamp": "2025-01-15T10:30:00.123456",
+  "status": 404,
+  "error": "Recurso no encontrado",
+  "mensaje": "Mesa no encontrada"
+}
+```
+
+---
+
+## PUT /api/mesas/{id}/ocupar
+
+Opens a new playing session on a table. Sets `estado` to `"OCUPADA"` and records `horaInicio` as the current server time (`LocalDateTime.now()`). This timestamp is later used by the close endpoint to compute billing.
+
+**Auth required:** Yes
+
+### Path parameter
+
+<ParamField path="id" type="integer" required>
+  The primary key of the table to open.
+</ParamField>
+
+### Example request
+
+```bash
+curl -X PUT http://localhost:8080/api/mesas/1/ocupar \
+  -H "Authorization: Bearer <token>"
+```
+
+### Example response (HTTP 200)
+
+```json
+{
+  "id": 1,
+  "numero": 1,
+  "estado": "OCUPADA",
+  "precioPorHora": 8000.0,
+  "horaInicio": "2025-01-15T10:00:00",
+  "activa": true
+}
+```
+
+### Error (HTTP 400)
+
+If the table is already `"OCUPADA"`, a `NegocioException` is thrown:
+
+```json
+{
+  "timestamp": "2025-01-15T10:30:00.123456",
+  "status": 400,
+  "error": "Error de negocio",
+  "mensaje": "La mesa ya está ocupada"
+}
+```
+
+---
+
+## PUT /api/mesas/{id}/cerrar
+
+Closes the current session on a table, computes the bill, creates a `Sesion` record (linking any pending consumptions to it), and resets the table to `"LIBRE"`. Returns a billing summary DTO instead of the raw `Mesa` object.
+
+**Auth required:** Yes
+
+### Billing calculation
+
+The service computes the charge using fractional hours based on elapsed minutes:
+
+```
+horas = Duration.between(horaInicio, now()).toMinutes() / 60.0
+totalMesa = horas × precioPorHora
+```
+
+The final `totalGeneral` is the sum of `totalAPagar` (table time) and `totalConsumos` (any consumptions linked to the session).
+
+### Path parameter
+
+<ParamField path="id" type="integer" required>
+  The primary key of the table to close.
+</ParamField>
+
+### Example request
+
+```bash
+curl -X PUT http://localhost:8080/api/mesas/1/cerrar \
+  -H "Authorization: Bearer <token>"
+```
+
+### Response fields
+
+<ResponseField name="horasJugadas" type="number">
+  Total elapsed time in fractional hours (e.g. `1.5` for 90 minutes).
+</ResponseField>
+
+<ResponseField name="precioPorHora" type="number">
+  The hourly rate that was applied to this session, taken from the table record.
+</ResponseField>
+
+<ResponseField name="totalAPagar" type="number">
+  The table-time charge: `horasJugadas × precioPorHora`.
+</ResponseField>
+
+<ResponseField name="totalConsumos" type="number">
+  The sum of all consumptions linked to this session (drinks, snacks, etc.).
+</ResponseField>
+
+<ResponseField name="totalGeneral" type="number">
+  Grand total: `totalAPagar + totalConsumos`.
+</ResponseField>
+
+### Example response (HTTP 200)
+
+```json
+{
+  "horasJugadas": 1.5,
+  "precioPorHora": 8000.0,
+  "totalAPagar": 12000.0,
+  "totalConsumos": 5000.0,
+  "totalGeneral": 17000.0
+}
+```
+
+### Error (HTTP 400)
+
+If the table is already `"LIBRE"` (no active session to close), a `NegocioException` is thrown:
+
+```json
+{
+  "timestamp": "2025-01-15T10:30:00.123456",
+  "status": 400,
+  "error": "Error de negocio",
+  "mensaje": "La mesa ya está libre"
+}
+```
+
+---
+
+## PUT /api/mesas/{id}
+
+Updates the `numero` and `precioPorHora` of an existing table. The table must be in `"LIBRE"` state — editing an in-use table is not allowed.
+
+**Auth required:** Yes
+
+### Path parameter
+
+<ParamField path="id" type="integer" required>
+  The primary key of the table to edit.
+</ParamField>
+
+### Request body
+
+<ParamField body="numero" type="integer" required>
+  The new display number to assign to the table.
+</ParamField>
+
+<ParamField body="precioPorHora" type="number" required>
+  The new hourly rate to apply to future sessions.
+</ParamField>
+
+### Example request
+
+```bash
+curl -X PUT http://localhost:8080/api/mesas/1 \
+  -H "Authorization: Bearer <token>" \
+  -H "Content-Type: application/json" \
+  -d '{"numero": 1, "precioPorHora": 10000.0}'
+```
+
+### Example response (HTTP 200)
+
+```json
+{
+  "id": 1,
+  "numero": 1,
+  "estado": "LIBRE",
+  "precioPorHora": 10000.0,
+  "horaInicio": null,
+  "activa": true
+}
+```
+
+### Error (HTTP 404)
+
+If the table is currently `"OCUPADA"`, the operation is rejected:
+
+```json
+{
+  "timestamp": "2025-01-15T10:30:00.123456",
+  "status": 404,
+  "error": "Recurso no encontrado",
+  "mensaje": "No se puede editar una mesa ocupada"
+}
+```
+
+---
+
+## DELETE /api/mesas/{id}/delete
+
+Removes a table from service. The deletion strategy depends on whether the table has any historical session records:
+
+- **No sessions** → the table row is **permanently deleted** from the database (`deleteById`).
+- **Has sessions** → the table is **soft-deleted**: `activa` is set to `false` and the record is kept for historical integrity. The table will no longer appear in `GET /api/mesas`.
+
+**Auth required:** Yes
+
+### Path parameter
+
+<ParamField path="id" type="integer" required>
+  The primary key of the table to delete or deactivate.
+</ParamField>
+
+### Example request
+
+```bash
+curl -X DELETE http://localhost:8080/api/mesas/3/delete \
+  -H "Authorization: Bearer <token>"
+```
+
+### Response (HTTP 204 No Content)
+
+An empty body is returned regardless of whether the table was physically deleted or soft-deleted.
+
+<Note>
+  Tables that have at least one linked session are **never physically deleted**. Setting `activa = false` preserves the full session history and billing records for auditing while hiding the table from active operations. To check whether a table was soft-deleted, query it directly via `GET /api/mesas/{id}` — the `activa` field will be `false`.
+</Note>
+
+### Error (HTTP 404)
+
+If no table with the given ID exists:
+
+```json
+{
+  "timestamp": "2025-01-15T10:30:00.123456",
+  "status": 404,
+  "error": "Recurso no encontrado",
+  "mensaje": "Mesa no encontrada"
+}
+```
+
+---
+
+## Error response schema
+
+Business-rule violations (`NegocioException`) return HTTP 400; not-found and other `RuntimeException`s return HTTP 404. Both use the same envelope shape from `GlobalExceptionHandler`:
+
+<ResponseField name="timestamp" type="string">
+  ISO-8601 local datetime of when the error occurred.
+</ResponseField>
+
+<ResponseField name="status" type="integer">
+  HTTP status code — `400` for business errors, `404` for not-found errors.
+</ResponseField>
+
+<ResponseField name="error" type="string">
+  Error category: `"Error de negocio"` (400) or `"Recurso no encontrado"` (404).
+</ResponseField>
+
+<ResponseField name="mensaje" type="string">
+  Specific description of what went wrong.
+</ResponseField>

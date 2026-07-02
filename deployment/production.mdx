@@ -1,0 +1,141 @@
+---
+title: "Deploy Billar Pro Backend to Production"
+sidebarTitle: "Production"
+description: "Checklist and guidance for deploying Billar Pro Backend to a production environment: security hardening, JPA settings, CORS configuration, and building a JAR."
+---
+
+Before you promote Billar Pro Backend beyond a local development machine there are several defaults that must change. The project ships with hardcoded passwords, an auto-schema-update JPA mode, SQL logging enabled, CORS locked to `localhost:5173`, a seed admin account with a known password, and — most critically — a JWT signing key that is randomly generated fresh on every startup. Each of these is intentional and convenient for development, but unsafe in production. This page walks through every required change before going live.
+
+## Production deployment steps
+
+<Steps>
+  <Step title="Build the JAR">
+    Billar Pro Backend requires **Java 21** (`java.version=21` in `pom.xml`). Verify your runtime before building:
+
+    ```bash
+    java -version   # must be 21.x
+    ```
+
+    Package the application, skipping tests to speed up the build:
+
+    ```bash
+    ./mvnw clean package -DskipTests
+    ```
+
+    The executable JAR is written to:
+
+    ```
+    target/billar-pro-0.0.1-SNAPSHOT.jar
+    ```
+  </Step>
+
+  <Step title="Configure a production database">
+    Use a managed PostgreSQL service (e.g. Amazon RDS, Google Cloud SQL, Supabase, Railway) rather than a local Docker container. Once you have a connection string, update your `application.yml` (or supply environment variables) to point at the production host.
+
+    **Critically**, change `ddl-auto` from `update` to `validate`. With `update`, Hibernate silently alters your production schema on every boot — a very easy way to cause data loss or downtime:
+
+    ```yaml
+    spring:
+      jpa:
+        hibernate:
+          ddl-auto: validate   # never use 'update' in production
+        show-sql: false        # avoid leaking queries into logs
+        properties:
+          hibernate:
+            dialect: org.hibernate.dialect.PostgreSQLDialect
+    ```
+
+    <Note>
+      `validate` will fail fast at startup if the database schema does not match the JPA entity model, giving you an early signal of a migration mismatch rather than silent corruption.
+    </Note>
+  </Step>
+
+  <Step title="Set environment variables">
+    Never hardcode passwords or connection strings in committed files. Use environment variables (or a secrets manager such as AWS Secrets Manager, HashiCorp Vault, or Doppler) for all sensitive values. The `.env.example` file documents the three variables the application needs at runtime:
+
+    ```dotenv
+    DB_URL=jdbc:postgresql://localhost:5433/billardb
+    DB_USER=postgres
+    DB_PASSWORD=tu_password_local
+    ```
+
+    Supply these in your deployment environment and reference them in `application.yml`:
+
+    ```yaml
+    spring:
+      datasource:
+        url: ${DB_URL}
+        username: ${DB_USER}
+        password: ${DB_PASSWORD}
+        driver-class-name: org.postgresql.Driver
+    ```
+  </Step>
+
+  <Step title="Update CORS to the production frontend origin">
+    `SecurityConfig.corsConfigurationSource()` currently hardcodes the allowed origin as `http://localhost:5173`:
+
+    ```java
+    config.setAllowedOrigins(List.of("http://localhost:5173"));
+    ```
+
+    Before deploying, update this value to the actual origin of your production frontend (e.g. `https://app.billarpro.com`). Leaving `localhost:5173` in place means browsers will block all cross-origin requests from your deployed frontend.
+
+    You can externalise this value into an environment variable to avoid code changes between environments:
+
+    ```java
+    config.setAllowedOrigins(List.of(System.getenv("FRONTEND_ORIGIN")));
+    ```
+  </Step>
+
+  <Step title="Change the default admin credentials">
+    `DataSeeder` runs on every startup and, when the `usuarios` table is empty, creates an admin account with the well-known credentials:
+
+    - **Username:** `admin`
+    - **Password:** `billar123`
+
+    Immediately after the very first successful startup against the production database, log in and change this password through the API. Any attacker who knows the project is Billar Pro Backend can try these credentials — they are publicly visible in the source code.
+  </Step>
+
+  <Step title="Run the JAR">
+    Launch the packaged application, passing the database connection details as command-line arguments (or via environment variables already set on the host):
+
+    ```bash
+    java -jar target/billar-pro-0.0.1-SNAPSHOT.jar \
+      --spring.datasource.url=$DB_URL \
+      --spring.datasource.username=$DB_USER \
+      --spring.datasource.password=$DB_PASSWORD
+    ```
+
+    For a long-running production process, run it under a process supervisor (systemd, Docker, Kubernetes) so it restarts automatically on failure.
+  </Step>
+</Steps>
+
+---
+
+## JWT token invalidation on restart
+
+<Warning>
+  The JWT signing key is generated **in-memory at startup** using `Keys.secretKeyFor(SignatureAlgorithm.HS256)` inside `JwtUtil`. There is no persistent key — every time the application process restarts, a brand-new key is created and all previously issued tokens become immediately invalid. Any logged-in user will receive `401 Unauthorized` responses after a restart and must log in again. Make sure your frontend teams are aware of this behaviour. If you need tokens to survive restarts, you must externalise the signing key to a stable secret (e.g. a Base64-encoded key stored in an environment variable) and inject it into `JwtUtil` rather than generating it on the fly.
+</Warning>
+
+Tokens are valid for **10 hours** (`EXPIRACION = 1000 * 60 * 60 * 10` milliseconds) from the time of issue. Plan your deployment windows accordingly — a scheduled restart will log out every active user.
+
+---
+
+## Security checklist
+
+<Accordion title="Production security checklist">
+  Review every item before your first production deployment:
+
+  - **Rotate admin password after first run** — `DataSeeder` seeds `admin` / `billar123` on an empty database. Change the password immediately via the API after the initial startup against the production database.
+
+  - **Use HTTPS behind a reverse proxy** — the Spring Boot app listens on plain HTTP port 8080. Place it behind a TLS-terminating reverse proxy such as Nginx, Caddy, or an AWS Application Load Balancer. Never expose port 8080 directly to the public internet.
+
+  - **Set `spring.jpa.show-sql: false`** — the default `application-example.yml` sets this to `true`. SQL statements written to application logs can expose schema details and query patterns to anyone with log access.
+
+  - **Set `spring.jpa.hibernate.ddl-auto: validate`** — the example configuration uses `update`, which lets Hibernate modify the live schema automatically. Use `validate` in production so any schema drift causes a startup failure rather than silent alteration.
+
+  - **Restrict CORS to your actual frontend origin** — `SecurityConfig` allows `http://localhost:5173` by default. Update `corsConfigurationSource()` to your real frontend URL before going live.
+
+  - **Externalise the JWT signing key** — the current `JwtUtil` generates a new random key with `Keys.secretKeyFor(SignatureAlgorithm.HS256)` on every startup, which means every application restart invalidates all issued tokens. For production, persist a stable key in a secret store and inject it via an environment variable so tokens survive restarts and rolling deployments.
+</Accordion>

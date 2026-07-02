@@ -1,0 +1,124 @@
+{
+  "projectType": "api-service",
+  "projectName": "Billar Pro Backend",
+  "projectDescription": "A Spring Boot REST API backend for managing billiard hall operations, including table sessions, product consumption tracking, and revenue reporting.",
+  "theme": "luma",
+  "primaryColor": "#1E6B3C",
+  "lightColor": "#D4EDDA",
+  "darkColor": "#0D3D20",
+  "navigation": {
+    "tabs": [
+      {
+        "tab": "Documentation",
+        "groups": [
+          {
+            "group": "Get Started",
+            "pages": [
+              "introduction",
+              "quickstart",
+              "configuration"
+            ]
+          },
+          {
+            "group": "Core Concepts",
+            "pages": [
+              "concepts/tables-and-sessions",
+              "concepts/products-and-consumption",
+              "concepts/reports"
+            ]
+          },
+          {
+            "group": "Deployment",
+            "pages": [
+              "deployment/docker",
+              "deployment/production"
+            ]
+          }
+        ]
+      },
+      {
+        "tab": "API Reference",
+        "groups": [
+          {
+            "group": "Authentication",
+            "pages": [
+              "api/authentication"
+            ]
+          },
+          {
+            "group": "Tables",
+            "pages": [
+              "api/mesas"
+            ]
+          },
+          {
+            "group": "Sessions",
+            "pages": [
+              "api/sesiones"
+            ]
+          },
+          {
+            "group": "Products",
+            "pages": [
+              "api/productos"
+            ]
+          },
+          {
+            "group": "Consumption",
+            "pages": [
+              "api/consumos"
+            ]
+          },
+          {
+            "group": "Reports",
+            "pages": [
+              "api/reportes"
+            ]
+          }
+        ]
+      }
+    ]
+  },
+  "keyFeatures": [
+    "JWT-based stateless authentication with BCrypt password hashing",
+    "Table (mesa) lifecycle management: LIBRE → OCUPADA → LIBRE with automatic time tracking",
+    "Product catalog management with availability control",
+    "Per-table consumption (consumo) recording during active sessions",
+    "Automatic session (sesion) creation and billing on table close",
+    "Revenue reports: daily, weekly, monthly with breakdown by table and product",
+    "Top products ranking and average ticket analytics",
+    "Soft-delete for tables with historical sessions",
+    "PostgreSQL persistence with Spring Data JPA and automatic schema management",
+    "Docker Compose setup for local development database"
+  ],
+  "publicApiSurface": [
+    "POST /api/auth/login",
+    "GET /api/mesas",
+    "POST /api/mesas",
+    "GET /api/mesas/{id}",
+    "PUT /api/mesas/{id}/ocupar",
+    "PUT /api/mesas/{id}/cerrar",
+    "PUT /api/mesas/{id}",
+    "DELETE /api/mesas/{id}/delete",
+    "GET /api/sesiones",
+    "GET /api/productos",
+    "GET /api/productos/{id}",
+    "POST /api/productos",
+    "PUT /api/productos/{id}",
+    "DELETE /api/productos/{id}",
+    "GET /api/consumos",
+    "POST /api/consumos",
+    "GET /api/consumos/mesa/{mesaId}",
+    "GET /api/reportes/diario?fecha=",
+    "GET /api/reportes/semanal?inicio=&fin=",
+    "GET /api/reportes/mensual?mes=&anio=",
+    "GET /api/reportes/ingresos-por-mesa/diario?fecha=",
+    "GET /api/reportes/ingresos-por-mesa/semanal?inicio=&fin=",
+    "GET /api/reportes/ingresos-por-mesa/mensual?mes=&anio=",
+    "GET /api/reportes/ingresos-por-dia?inicio=&fin=",
+    "GET /api/reportes/productos-top/diario?fecha=",
+    "GET /api/reportes/productos-top/semanal?inicio=&fin=",
+    "GET /api/reportes/productos-top/mensual?mes=&anio=",
+    "GET /api/reportes/ticket-promedio?inicio=&fin="
+  ]
+}

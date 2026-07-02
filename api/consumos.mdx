@@ -1,0 +1,199 @@
+---
+title: "Consumption API: Register Product Sales at Tables"
+sidebarTitle: "Consumption"
+description: "POST /api/consumos records product sales against an active table. GET /api/consumos/mesa/{mesaId} returns open consumptions not yet linked to a session."
+---
+
+Consumptions (consumos) are the line items that link a product to a table during an active session. Each time a customer orders a drink or snack, staff register a consumption record pointing to the table and the product. Those records accumulate with `sesion = null` while the table is in use, and when the table is eventually closed via `PUT /api/mesas/{id}/cerrar`, the system automatically sums all open consumptions, computes the `totalConsumos`, and permanently attaches every pending record to the newly created Sesion — so the full bill is captured in one atomic operation.
+
+## Endpoints
+
+### GET /api/consumos
+
+Returns every consumption record in the database, including those already linked to closed sessions.
+
+**Authentication:** Required.
+
+**Response:** `200 OK` — array of Consumo objects.
+
+<ResponseField name="id" type="Long">
+  Auto-generated primary key of the consumption record.
+</ResponseField>
+
+<ResponseField name="mesa" type="object">
+  The table against which the sale was recorded.
+  <Expandable title="mesa fields">
+    <ResponseField name="id" type="Long">
+      Primary key of the table.
+    </ResponseField>
+    <ResponseField name="numero" type="Integer">
+      Human-readable table number.
+    </ResponseField>
+    <ResponseField name="estado" type="String">
+      Current state of the table (`"OCUPADA"` or `"LIBRE"`).
+    </ResponseField>
+    <ResponseField name="precioPorHora" type="Double">
+      Hourly rate configured for this table.
+    </ResponseField>
+  </Expandable>
+</ResponseField>
+
+<ResponseField name="producto" type="object">
+  The product that was sold.
+  <Expandable title="producto fields">
+    <ResponseField name="id" type="Long">
+      Primary key of the product.
+    </ResponseField>
+    <ResponseField name="nombre" type="String">
+      Display name of the product.
+    </ResponseField>
+    <ResponseField name="categoria" type="String">
+      Category label, e.g. `"Bebidas"`.
+    </ResponseField>
+    <ResponseField name="precio" type="Double">
+      Unit price at the time the product record was last updated. Note: the `subtotal` on the Consumo was fixed at registration time.
+    </ResponseField>
+    <ResponseField name="disponible" type="Boolean">
+      Current availability flag of the product.
+    </ResponseField>
+  </Expandable>
+</ResponseField>
+
+<ResponseField name="cantidad" type="Integer">
+  Number of units sold in this consumption record.
+</ResponseField>
+
+<ResponseField name="subtotal" type="Double">
+  Computed at registration time as `producto.precio × cantidad`. Not recalculated if the product price changes later.
+</ResponseField>
+
+<ResponseField name="fecha" type="String (ISO 8601 datetime)">
+  Timestamp when the consumption was registered, e.g. `"2025-06-01T15:22:45"`.
+</ResponseField>
+
+<ResponseField name="sesion" type="Long | null">
+  `null` while the consumption is open (table not yet closed). Set to the Sesion `id` once the table is closed.
+</ResponseField>
+
+#### Request example
+
+```bash
+curl -X GET http://localhost:8080/api/consumos \
+  -H "Authorization: Bearer <token>"
+```
+
+---
+
+### POST /api/consumos
+
+Registers a new product sale against a table. The server looks up the product price and computes `subtotal` automatically.
+
+**Authentication:** Required.
+
+**Request body (JSON):**
+
+<ParamField body="mesaId" type="Long" required>
+  ID of the table to charge. The table must already exist in the database.
+</ParamField>
+
+<ParamField body="productoId" type="Long" required>
+  ID of the product being sold. The product must exist and have `disponible = true` or the request will be rejected.
+</ParamField>
+
+<ParamField body="cantidad" type="Integer" required>
+  Number of units being sold. The server multiplies this by the product's current unit price to set `subtotal`.
+</ParamField>
+
+**Server-side computation:**
+
+```
+subtotal = producto.precio × cantidad
+```
+
+The `subtotal` is persisted with the record and is not updated if the product price changes after registration.
+
+**Response:** `201 Created` — the created Consumo object.
+
+**Errors:**
+
+| Status | Meaning |
+| ------ | ------- |
+| `404`  | `mesaId` or `productoId` does not exist. |
+| `404`  | Product exists but `disponible = false` (`"Producto no disponible"`). |
+
+#### Request example
+
+```bash
+curl -X POST http://localhost:8080/api/consumos \
+  -H "Authorization: Bearer <token>" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "mesaId": 1,
+    "productoId": 2,
+    "cantidad": 3
+  }'
+```
+
+#### Response example
+
+```json
+{
+  "id": 47,
+  "mesa": {
+    "id": 1,
+    "numero": 1,
+    "estado": "OCUPADA",
+    "precioPorHora": 8000.0
+  },
+  "producto": {
+    "id": 2,
+    "nombre": "Gaseosa",
+    "categoria": "Bebidas",
+    "precio": 2500.0,
+    "disponible": true
+  },
+  "cantidad": 3,
+  "subtotal": 7500.0,
+  "fecha": "2025-06-01T15:22:45",
+  "sesion": null
+}
+```
+
+---
+
+### GET /api/consumos/mesa/\{mesaId\}
+
+Returns only the **open** consumptions for a given table — that is, records where `sesion IS NULL`. These are the pending items that will be included in the bill when the table is eventually closed.
+
+**Authentication:** Required.
+
+**Path parameters:**
+
+<ParamField path="mesaId" type="Long" required>
+  Primary key of the table whose open consumptions should be retrieved.
+</ParamField>
+
+**Response:** `200 OK` — array of Consumo objects (may be empty if no open consumptions exist).
+
+**Errors:**
+
+| Status | Meaning |
+| ------ | ------- |
+| `404`  | No table with that `mesaId` exists. |
+
+#### Request example
+
+```bash
+curl -X GET http://localhost:8080/api/consumos/mesa/1 \
+  -H "Authorization: Bearer <token>"
+```
+
+---
+
+<Note>
+  **Consumption lifecycle:** A consumption is created with `sesion = null`, meaning it is unlinked and open. When `PUT /api/mesas/{id}/cerrar` is called, `SesionService` queries all records matching `findByMesaAndSesionIsNull`, totals their subtotals, saves the new Sesion, and then sets `sesion` on every matching Consumo. From that point the records become part of the immutable session history and will no longer appear in the `/api/consumos/mesa/{mesaId}` response.
+</Note>
+
+<Warning>
+  The API does not check whether a table is currently `OCUPADA` before registering a consumption. If a consumption is posted against a table in the `LIBRE` state, the record is saved successfully with `sesion = null`. It will then be picked up and billed the next time that table is closed — which may be a completely different customer's session. Always confirm the table is actively occupied before registering consumptions.
+</Warning>

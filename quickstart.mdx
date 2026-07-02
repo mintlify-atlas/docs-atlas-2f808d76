@@ -1,47 +1,136 @@
 ---
-title: "Quickstart"
-description: "Begin with a guide on the fastest path to a successful outcome"
+title: "Get Started with Billar Pro Backend"
+sidebarTitle: "Quickstart"
+description: "Run Billar Pro Backend locally in five steps: clone the repo, start PostgreSQL with Docker, configure the application, build with Maven, and make your first API call."
 ---
 
-Describe how someone begins using your product. What is the first thing they need to do? Are there any prerequisites?
-
-A quickstart should take someone from zero to using your product. They'll get a quick win and a sense of what they can accomplish.
-
-## Prerequisites
-
-Before you begin, you must have:
-
-- Requirement one (for example, Node.js 18+, a free account, an API key)
-- Requirement two (for example, a compatible device, a compatible browser, a compatible operating system)
-
-## Get started
+This guide walks you from zero to a running Billar Pro Backend instance on your local machine. You will need **Java 21**, **Maven** (or use the included `mvnw` wrapper), and **Docker** with Docker Compose installed. The whole process takes under five minutes.
 
 <Steps>
-  <Step title="Install">
-    Describe how to install your product or sign up.
+
+  <Step title="Clone the repository">
+    Download the source code from GitHub:
 
     ```bash
-    npm install your-package
+    git clone https://github.com/ierinconc/billar-pro-backend.git
+    cd billar-pro-backend
     ```
   </Step>
-  <Step title="Configure">
-    Describe any setup or configuration needed before first use.
+
+  <Step title="Start PostgreSQL with Docker">
+    The repository ships a `docker-compose.yml` that starts a PostgreSQL 16 container named `billarpro-postgres`. It maps the container's port 5432 to **host port 5433** and creates the `billardb` database automatically.
 
     ```bash
-    your-cli init
+    docker-compose up -d
     ```
-  </Step>
-  <Step title="Run it">
-    Show the first thing a user does to see it working.
+
+    Verify the container is healthy:
 
     ```bash
-    your-cli start
+    docker ps
+    ```
+
+    You should see `billarpro-postgres` with a status of `Up`. The database is now reachable at `localhost:5433`.
+  </Step>
+
+  <Step title="Configure the application">
+    Copy the provided example configuration to create your local `application.yml`:
+
+    ```bash
+    cp src/main/resources/application-example.yml src/main/resources/application.yml
+    ```
+
+    Open `src/main/resources/application.yml` and set the datasource password to match the one in `docker-compose.yml`:
+
+    ```yaml
+    spring:
+      datasource:
+        url: jdbc:postgresql://localhost:5433/billardb
+        username: postgres
+        password: YOUR_PASSWORD
+        driver-class-name: org.postgresql.Driver
+      jpa:
+        hibernate:
+          ddl-auto: update
+        show-sql: true
+        properties:
+          hibernate:
+            dialect: org.hibernate.dialect.PostgreSQLDialect
+
+    server:
+      port: 8080
+    ```
+
+    <Note>
+      The example file uses port `5432` in the JDBC URL, but the Docker Compose setup maps the container to host port **5433**. Make sure to use `jdbc:postgresql://localhost:5433/billardb` in your local `application.yml`.
+    </Note>
+
+    Alternatively, you can copy `.env.example` to `.env` and supply credentials as environment variables for a Docker-based deployment:
+
+    ```bash
+    cp .env.example .env
+    # Edit .env with your chosen passwords
     ```
   </Step>
+
+  <Step title="Build and run">
+    Use the Maven wrapper to compile and start the server:
+
+    ```bash
+    ./mvnw spring-boot:run
+    ```
+
+    On **Windows**, use:
+
+    ```bash
+    mvnw.cmd spring-boot:run
+    ```
+
+    Watch the startup logs. The `DataSeeder` will automatically create 6 tables and the `admin` user the first time the application connects to an empty database:
+
+    ```
+    Mesas creadas exitosamente
+    Usuario admin creado exitosamente
+    ```
+
+    The API is ready when you see a log line confirming Tomcat started on port **8080**.
+  </Step>
+
+  <Step title="Make your first API call">
+    Authenticate with the default admin credentials to receive a JWT token:
+
+    ```bash
+    curl -s -X POST http://localhost:8080/api/auth/login \
+      -H "Content-Type: application/json" \
+      -d '{"username": "admin", "password": "billar123"}'
+    ```
+
+    The response body is the JWT token string:
+
+    ```
+    eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiJhZG1pbiIsImlhdCI6...
+    ```
+
+    Copy the token — you will use it as a bearer credential for every subsequent request.
+  </Step>
+
 </Steps>
 
-<Tip>
-  Give people a way to get help. This could be a link to a support page, a chat with a customer support agent, or a forum for your product.
+## Using the JWT Token
 
-  Example: Need help? Reach out to us at [support@yourcompany.com](mailto:support@yourcompany.com).
-</Tip>
+Pass the token in the `Authorization` header to access any protected endpoint. For example, retrieve the list of all billiard tables:
+
+```bash
+curl -s http://localhost:8080/api/mesas \
+  -H "Authorization: Bearer <your-token-here>"
+```
+
+Replace `<your-token-here>` with the full token string returned by the login call. A successful response returns a JSON array of `Mesa` objects, each showing the table number, state, and price per hour.
+
+<Note>
+  JWT tokens issued by Billar Pro Backend expire after **10 hours**. After expiry, repeat the `POST /api/auth/login` call to obtain a fresh token. There is no refresh-token mechanism; re-authentication is required.
+</Note>
+
+<Warning>
+  The default password `billar123` is seeded for local development only. **Change it before deploying to any shared or public environment.** A compromised admin account gives full access to all session, product, and consumption data.
+</Warning>

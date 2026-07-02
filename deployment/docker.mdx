@@ -1,0 +1,158 @@
+---
+title: "Run Billar Pro Backend with Docker Compose"
+sidebarTitle: "Docker Setup"
+description: "Set up Billar Pro Backend for local development using Docker Compose to run PostgreSQL 16, then launch the Spring Boot app with Maven."
+---
+
+The included `docker-compose.yml` spins up a single PostgreSQL 16 container named `billarpro-postgres`, giving you a fully isolated local database without installing Postgres directly on your machine. The Spring Boot application itself runs outside Docker via Maven, connecting to the containerized database over localhost.
+
+## docker-compose.yml
+
+```yaml docker-compose.yml
+services:
+  db:
+    image: postgres:16
+    container_name: billarpro-postgres
+    restart: always
+    environment:
+      POSTGRES_DB: billardb
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: mcrmael11
+    ports:
+      - "5433:5432"
+    volumes:
+      - billarpro_postgres_data:/var/lib/postgresql/data
+
+volumes:
+  billarpro_postgres_data:
+```
+
+<Warning>
+  The `POSTGRES_PASSWORD` value `mcrmael11` is hardcoded directly in `docker-compose.yml`. Before sharing this file or using it in any environment beyond your own local machine, replace the literal value with an environment variable reference (e.g. `${POSTGRES_PASSWORD}`) and supply the actual secret through a `.env` file or your CI/CD secrets store.
+</Warning>
+
+## Port mapping
+
+The container exposes PostgreSQL internally on port **5432**, but it is bound to **host port 5433** to avoid conflicts with any locally installed Postgres instance. Your JDBC URL must therefore target port `5433`:
+
+```
+jdbc:postgresql://localhost:5433/billardb
+```
+
+## .env.example
+
+Use this file as the template for your local `.env`. Copy it to `.env` and fill in your chosen password — Docker Compose automatically loads `.env` from the project root.
+
+```dotenv .env.example
+POSTGRES_DB=billardb
+POSTGRES_USER=postgres
+POSTGRES_PASSWORD=tu_password_local
+
+DB_URL=jdbc:postgresql://localhost:5433/billardb
+DB_USER=postgres
+DB_PASSWORD=tu_password_local
+```
+
+## Starting the local stack
+
+<Steps>
+  <Step title="Create your local .env file">
+    Copy the example file and set a password of your choice:
+
+    ```bash
+    cp .env.example .env
+    ```
+
+    Open `.env` and replace `tu_password_local` with the password you want to use for the local database.
+  </Step>
+
+  <Step title="Start the PostgreSQL container">
+    Launch the database in detached mode:
+
+    ```bash
+    docker-compose up -d
+    ```
+
+    Docker Compose reads `.env` automatically. The container is ready as soon as `docker-compose ps` shows it as **Up**.
+  </Step>
+
+  <Step title="Configure application.yml">
+    Copy the application configuration example and update the credentials to match what you set in `.env`:
+
+    ```bash
+    cp src/main/resources/application-example.yml src/main/resources/application.yml
+    ```
+
+    Edit `src/main/resources/application.yml` and replace `TU_CONTRASEÑA_AQUI` with your chosen password. Also confirm the JDBC URL uses port `5433`:
+
+    ```yaml src/main/resources/application.yml
+    spring:
+      datasource:
+        url: jdbc:postgresql://localhost:5433/billardb
+        username: postgres
+        password: YOUR_LOCAL_PASSWORD
+        driver-class-name: org.postgresql.Driver
+      jpa:
+        hibernate:
+          ddl-auto: update
+        show-sql: true
+        properties:
+          hibernate:
+            dialect: org.hibernate.dialect.PostgreSQLDialect
+
+    server:
+      port: 8080
+    ```
+  </Step>
+
+  <Step title="Run the Spring Boot application">
+    Start the backend with the Maven wrapper (Java 21 required):
+
+    ```bash
+    ./mvnw spring-boot:run
+    ```
+
+    On first startup, `DataSeeder` automatically creates six billiard tables and an `admin` user. Look for the log lines:
+
+    ```
+    Mesas creadas exitosamente
+    Usuario admin creado exitosamente
+    ```
+  </Step>
+
+  <Step title="Verify the API is running">
+    Send a login request to confirm the application is reachable:
+
+    ```bash
+    curl -s -X POST http://localhost:8080/api/auth/login \
+      -H "Content-Type: application/json" \
+      -d '{"username":"admin","password":"billar123"}'
+    ```
+
+    A successful response returns a JWT token. Store it and pass it as a `Bearer` token in the `Authorization` header for all subsequent requests.
+  </Step>
+</Steps>
+
+## Useful Docker commands
+
+| Command | Purpose |
+|---|---|
+| `docker-compose ps` | Show running container status |
+| `docker-compose logs db` | Tail PostgreSQL logs |
+| `docker-compose down` | Stop and remove the container (data is preserved in the volume) |
+| `docker-compose down -v` | Stop and remove the container **and** delete the volume |
+
+```bash
+# Check container status
+docker-compose ps
+
+# Follow database logs
+docker-compose logs -f db
+
+# Stop the container (keeps volume data intact)
+docker-compose down
+```
+
+<Tip>
+  PostgreSQL data is stored in the named Docker volume `billarpro_postgres_data`. This volume persists across `docker-compose down` and `docker-compose up` cycles, so your tables and rows survive container restarts. Only `docker-compose down -v` (or manually running `docker volume rm billarpro_postgres_data`) will permanently delete the data.
+</Tip>

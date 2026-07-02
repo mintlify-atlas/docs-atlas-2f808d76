@@ -1,0 +1,220 @@
+---
+title: "Products API: Manage the Product Catalog"
+sidebarTitle: "Products"
+description: "CRUD endpoints for the Billar Pro product catalog. Products can be linked to table sessions as consumptions. Mark products as unavailable instead of deleting them."
+---
+
+The products (productos) API manages the catalog of items — drinks, snacks, and anything else sold at the tables — that staff can record as consumptions during an active session. Each product carries a price and an availability flag so that seasonal or out-of-stock items can be hidden from the point-of-sale without permanently removing their history from past consumption records.
+
+## Endpoints
+
+### GET /api/productos
+
+Returns the complete product catalog, both available and unavailable items.
+
+**Authentication:** Required.
+
+**Response:** `200 OK` — array of Producto objects.
+
+<ResponseField name="id" type="Long">
+  Auto-generated primary key.
+</ResponseField>
+
+<ResponseField name="nombre" type="String">
+  Display name of the product, e.g. `"Gaseosa"`.
+</ResponseField>
+
+<ResponseField name="categoria" type="String">
+  Free-text category label, e.g. `"Bebidas"` or `"Snacks"`.
+</ResponseField>
+
+<ResponseField name="precio" type="Double">
+  Unit price in local currency.
+</ResponseField>
+
+<ResponseField name="disponible" type="Boolean">
+  `true` if the product is currently available for sale; `false` hides it from active menus while preserving historical data.
+</ResponseField>
+
+#### Request example
+
+```bash
+curl -X GET http://localhost:8080/api/productos \
+  -H "Authorization: Bearer <token>"
+```
+
+---
+
+### GET /api/productos/\{id\}
+
+Returns a single product by its primary key.
+
+**Authentication:** Required.
+
+**Path parameters:**
+
+<ParamField path="id" type="Long" required>
+  Primary key of the product to retrieve.
+</ParamField>
+
+**Response:** `200 OK` — Producto object.
+
+**Errors:**
+
+| Status | Meaning                     |
+| ------ | --------------------------- |
+| `404`  | No product with that `id` exists. |
+
+#### Request example
+
+```bash
+curl -X GET http://localhost:8080/api/productos/5 \
+  -H "Authorization: Bearer <token>"
+```
+
+---
+
+### POST /api/productos
+
+Creates a new product in the catalog.
+
+**Authentication:** Required.
+
+**Request body (JSON):**
+
+<ParamField body="nombre" type="string" required>
+  Display name for the product. Must not be blank.
+</ParamField>
+
+<ParamField body="categoria" type="string" required>
+  Category label for grouping on the menu, e.g. `"Bebidas"`, `"Snacks"`, `"Licores"`.
+</ParamField>
+
+<ParamField body="precio" type="double" required>
+  Unit price in local currency. Must be a positive number.
+</ParamField>
+
+<ParamField body="disponible" type="boolean" required>
+  Pass `true` to make the product immediately available for consumptions; `false` to add it in a hidden state.
+</ParamField>
+
+**Response:** `201 Created` — the newly created Producto object including its generated `id`.
+
+#### Request example
+
+```bash
+curl -X POST http://localhost:8080/api/productos \
+  -H "Authorization: Bearer <token>" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "nombre": "Gaseosa",
+    "categoria": "Bebidas",
+    "precio": 2500.0,
+    "disponible": true
+  }'
+```
+
+#### Response example
+
+```json
+{
+  "id": 8,
+  "nombre": "Gaseosa",
+  "categoria": "Bebidas",
+  "precio": 2500.0,
+  "disponible": true
+}
+```
+
+---
+
+### PUT /api/productos/\{id\}
+
+Replaces all fields of an existing product. All four body fields must be supplied — this is a full replacement, not a partial update.
+
+**Authentication:** Required.
+
+**Path parameters:**
+
+<ParamField path="id" type="Long" required>
+  Primary key of the product to update.
+</ParamField>
+
+**Request body (JSON):**
+
+<ParamField body="nombre" type="string" required>
+  New display name.
+</ParamField>
+
+<ParamField body="categoria" type="string" required>
+  New category label.
+</ParamField>
+
+<ParamField body="precio" type="double" required>
+  New unit price. Changing the price does **not** retroactively affect closed-session subtotals, which were computed at registration time.
+</ParamField>
+
+<ParamField body="disponible" type="boolean" required>
+  Updated availability flag.
+</ParamField>
+
+**Response:** `200 OK` — the updated Producto object.
+
+**Errors:**
+
+| Status | Meaning                     |
+| ------ | --------------------------- |
+| `404`  | No product with that `id` exists. |
+
+#### Request example
+
+```bash
+curl -X PUT http://localhost:8080/api/productos/8 \
+  -H "Authorization: Bearer <token>" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "nombre": "Gaseosa 500ml",
+    "categoria": "Bebidas",
+    "precio": 3000.0,
+    "disponible": true
+  }'
+```
+
+---
+
+### DELETE /api/productos/\{id\}
+
+Permanently removes a product from the catalog.
+
+**Authentication:** Required.
+
+**Path parameters:**
+
+<ParamField path="id" type="Long" required>
+  Primary key of the product to delete.
+</ParamField>
+
+**Response:** `204 No Content` — empty body on success.
+
+**Errors:**
+
+| Status | Meaning                     |
+| ------ | --------------------------- |
+| `404`  | No product with that `id` exists. |
+
+#### Request example
+
+```bash
+curl -X DELETE http://localhost:8080/api/productos/8 \
+  -H "Authorization: Bearer <token>"
+```
+
+---
+
+<Warning>
+  Deleting a product that already appears in historical consumptions will break those records — the foreign key `producto_id` in the `consumos` table will reference a row that no longer exists. **Prefer setting `disponible: false`** to remove the product from active sale without destroying sales history.
+</Warning>
+
+<Tip>
+  Use `disponible: false` to temporarily pull a product off the menu — for example when a drink is out of stock — and flip it back to `true` when it is restocked. This preserves the full consumption history and avoids the need to re-create the product with a new `id`.
+</Tip>

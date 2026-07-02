@@ -1,0 +1,159 @@
+---
+title: "Configure Billar Pro Backend"
+sidebarTitle: "Configuration"
+description: "All configuration options for Billar Pro Backend: database connection, JPA settings, server port, CORS origins, and security settings."
+---
+
+Billar Pro Backend is configured through a standard Spring Boot `application.yml` (or `application.yaml`) file located at `src/main/resources/`. Individual values can be overridden with environment variables using Spring's relaxed-binding rules (e.g. `SPRING_DATASOURCE_PASSWORD`), which makes the application easy to configure inside Docker containers or CI pipelines without modifying the committed YAML file.
+
+## Full Configuration Example
+
+The following is the complete `application-example.yml` as it appears in the repository. Copy it to `application.yml` and fill in your values before starting the server:
+
+```yaml
+spring:
+  datasource:
+    url: jdbc:postgresql://localhost:5432/billardb
+    username: postgres
+    password: YOUR_PASSWORD
+    driver-class-name: org.postgresql.Driver
+  jpa:
+    hibernate:
+      ddl-auto: update
+    show-sql: true
+    properties:
+      hibernate:
+        dialect: org.hibernate.dialect.PostgreSQLDialect
+
+server:
+  port: 8080
+```
+
+---
+
+## Database
+
+These properties control how Spring Boot connects to PostgreSQL via JDBC and how Hibernate manages the schema.
+
+<ParamField path="spring.datasource.url" type="string" required>
+  The JDBC connection URL for PostgreSQL. When using the bundled Docker Compose file the container is mapped to host port **5433**, so use `jdbc:postgresql://localhost:5433/billardb`. The example file defaults to port `5432` (standard PostgreSQL port for non-Docker setups).
+</ParamField>
+
+<ParamField path="spring.datasource.username" type="string" required>
+  The PostgreSQL username. The Docker Compose container is pre-configured with the username `postgres`.
+</ParamField>
+
+<ParamField path="spring.datasource.password" type="string" required>
+  The PostgreSQL password for the user above. Must match the `POSTGRES_PASSWORD` value set in `docker-compose.yml` (or your `.env` file). Never commit a real password to version control — use environment variable substitution in production.
+</ParamField>
+
+<ParamField path="spring.datasource.driver-class-name" type="string" default="org.postgresql.Driver">
+  The fully-qualified JDBC driver class. Leave this as `org.postgresql.Driver`; changing it is only necessary if you swap the database engine entirely.
+</ParamField>
+
+<ParamField path="spring.jpa.hibernate.ddl-auto" type="string" default="update">
+  Controls how Hibernate manages the database schema at startup.
+
+  | Value | Behaviour |
+  |---|---|
+  | `update` | Creates missing tables and columns; never drops existing data. Safe for development. |
+  | `validate` | Validates that the schema matches the entity model; fails fast if there is a mismatch. Recommended for production. |
+  | `create-drop` | Drops and recreates the full schema on every restart. **Destroys all data — never use in production.** |
+</ParamField>
+
+<ParamField path="spring.jpa.show-sql" type="boolean" default="true">
+  When `true`, Hibernate logs every SQL statement it executes to standard output. Useful during development; set to `false` in production to reduce log noise and avoid leaking query details.
+</ParamField>
+
+<ParamField path="spring.jpa.properties.hibernate.dialect" type="string" default="org.hibernate.dialect.PostgreSQLDialect">
+  The Hibernate SQL dialect. Must be `org.hibernate.dialect.PostgreSQLDialect` for PostgreSQL. Do not change unless you are migrating to a different database engine.
+</ParamField>
+
+---
+
+## Server
+
+<ParamField path="server.port" type="integer" default="8080">
+  The TCP port on which the embedded Tomcat server listens. The default `8080` is fine for local development. In a containerised production deployment, map the host port externally rather than changing this value.
+</ParamField>
+
+---
+
+## CORS
+
+Cross-Origin Resource Sharing is configured in `SecurityConfig.corsConfigurationSource()`. The current settings are **hardcoded** in Java rather than in `application.yml`:
+
+```java
+@Bean
+public CorsConfigurationSource corsConfigurationSource() {
+    CorsConfiguration config = new CorsConfiguration();
+    config.setAllowedOrigins(List.of("http://localhost:5173"));
+    config.setAllowedMethods(List.of("GET", "POST", "PUT", "DELETE", "OPTIONS"));
+    config.setAllowedHeaders(List.of("*"));
+    config.setAllowCredentials(true);
+    return new UrlBasedCorsConfigurationSource() {{
+        registerCorsConfiguration("/**", config);
+    }};
+}
+```
+
+| Setting | Value |
+|---|---|
+| Allowed origin | `http://localhost:5173` |
+| Allowed methods | `GET`, `POST`, `PUT`, `DELETE`, `OPTIONS` |
+| Allowed headers | All (`*`) |
+| Allow credentials | `true` |
+
+The single allowed origin `http://localhost:5173` targets the default Vite dev server, which is the conventional frontend port for Vue and React projects scaffolded with Vite.
+
+<Tip>
+  To support a different frontend URL (e.g. a staging server at `https://app.example.com`), open `src/main/java/billar_pro/config/SecurityConfig.java` and update the `setAllowedOrigins` list. You can supply multiple origins by adding more entries to the `List.of(...)` call.
+</Tip>
+
+---
+
+## Security
+
+Security behaviour is controlled entirely in code (`SecurityConfig.java` and `JwtUtil.java`) and is not configurable through `application.yml`. The following table summarises the relevant values:
+
+| Property | Value | Notes |
+|---|---|---|
+| JWT signing algorithm | HMAC-SHA256 (`HS256`) | Symmetric key, generated in-memory at startup |
+| JWT expiry | **10 hours** | `EXPIRACION = 1000 * 60 * 60 * 10` ms |
+| Session policy | `STATELESS` | No HTTP session is ever created |
+| Password encoder | `BCryptPasswordEncoder` | Default strength (10 rounds) |
+| CSRF protection | Disabled | Appropriate for stateless token APIs |
+| Public endpoints | `POST /api/auth/login` | All other endpoints require a valid bearer token |
+
+<Warning>
+  The JWT signing key is generated fresh with `Keys.secretKeyFor(SignatureAlgorithm.HS256)` every time the application starts. **Restarting the server invalidates all previously issued tokens.** Every connected client must re-authenticate after a restart. For production deployments that require zero-downtime restarts or horizontal scaling, replace the in-memory key with a stable secret stored in a secure secrets manager (e.g. AWS Secrets Manager, HashiCorp Vault) and inject it at startup.
+</Warning>
+
+---
+
+## Docker Environment Variables
+
+The `.env.example` file in the repository root documents the environment variables used by the Docker Compose setup. Copy it to `.env` and fill in your values:
+
+```bash
+POSTGRES_DB=billardb
+POSTGRES_USER=postgres
+POSTGRES_PASSWORD=tu_password_local
+
+DB_URL=jdbc:postgresql://localhost:5433/billardb
+DB_USER=postgres
+DB_PASSWORD=tu_password_local
+```
+
+| Variable | Description |
+|---|---|
+| `POSTGRES_DB` | Name of the PostgreSQL database to create inside the container |
+| `POSTGRES_USER` | PostgreSQL superuser username |
+| `POSTGRES_PASSWORD` | PostgreSQL superuser password |
+| `DB_URL` | JDBC URL used by the Spring Boot application |
+| `DB_USER` | Database username passed to the application |
+| `DB_PASSWORD` | Database password passed to the application |
+
+<Note>
+  Add `.env` to your `.gitignore` to ensure real credentials are never committed to version control. Only `.env.example` (with placeholder values) should be tracked by Git.
+</Note>
